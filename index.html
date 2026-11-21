@@ -1,43 +1,59 @@
 <!doctype html>
-<html lang="en">
+<html lang="it">
   <head>
     <meta charset="UTF-8" />
     <link rel="stylesheet" href="/src/styles.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Tauri App</title>
+    <title>Rare Pit Wall</title>
     <script type="module" src="/src/main.ts" defer></script>
   </head>
-
   <body>
-    <main class="container">
-      <h1>Welcome to Tauri</h1>
+    <header class="bar">
+      <img src="/src/assets/r-mark.svg" alt="" />
+      <b class="d">RARE PIT WALL</b>
+      <span id="ver" class="ver"></span>
+    </header>
 
-      <div class="row">
-        <a href="https://vite.dev" target="_blank">
-          <img src="/src/assets/vite.svg" class="logo vite" alt="Vite logo" />
-        </a>
-        <a href="https://tauri.app" target="_blank">
-          <img
-            src="/src/assets/tauri.svg"
-            class="logo tauri"
-            alt="Tauri logo"
-          />
-        </a>
-        <a href="https://www.typescriptlang.org/docs" target="_blank">
-          <img
-            src="/src/assets/typescript.svg"
-            class="logo typescript"
-            alt="typescript logo"
-          />
-        </a>
-      </div>
-      <p>Click on the Tauri logo to learn more about the framework</p>
-
-      <form class="row" id="greet-form">
-        <input id="greet-input" placeholder="Enter a name..." />
-        <button type="submit">Greet</button>
+    <!-- 1 · Abbinamento -->
+    <section id="pair" hidden>
+      <p class="k">Primo avvio</p>
+      <h1 class="d">Collega il tuo account</h1>
+      <p class="txt">Nell'area piloti apri <b>Profilo → Rare Pit Wall</b>, premi «Crea codice» e scrivilo qui.</p>
+      <form id="pair-form">
+        <input id="code" maxlength="6" autocomplete="off" spellcheck="false" placeholder="R7K2P9" />
+        <button type="submit" id="pair-btn">Collega</button>
       </form>
-      <p id="greet-msg"></p>
-    </main>
+      <p id="pair-msg" class="msg"></p>
+      <a href="#" id="open-profile" class="link">Apri il Profilo nel browser ↗</a>
+    </section>
+
+    <!-- 2 · In attesa / 3 · In pista -->
+    <section id="main" hidden>
+      <div class="st"><i id="dot"></i><span id="st-text">In attesa di iRacing</span></div>
+      <div id="waiting">
+        <p class="txt">Ciao <b id="driver"></b>. Apri iRacing ed entra in una sessione: il resto parte da solo.</p>
+        <div class="feats">
+          <div class="feat"><span>Collegamento al sito</span><em>attivo</em></div>
+          <div class="feat"><span>Risultati automatici</span><em class="off">in arrivo</em></div>
+          <div class="feat"><span>Cruscotto sul telefono</span><em class="off">in arrivo</em></div>
+          <div class="feat"><span>Ingegnere a voce</span><em class="off">in arrivo</em></div>
+          <div class="feat"><span>Pit wall (endurance)</span><em class="off">in arrivo</em></div>
+        </div>
+      </div>
+      <div id="live" hidden>
+        <div class="kv">
+          <div>Giro<b id="v-lap">–</b></div>
+          <div>Posizione<b id="v-pos">–</b></div>
+          <div>Benzina<b id="v-fuel">–</b></div>
+          <div>Incidenti<b id="v-inc">–</b></div>
+          <div>Velocità<b id="v-speed">–</b></div>
+          <div>Marcia<b id="v-gear">–</b></div>
+        </div>
+      </div>
+      <footer>
+        <span>Chiudendo la finestra il programma resta attivo vicino all'orologio.</span>
+        <a href="#" id="unpair" class="link">Scollega questo PC</a>
+      </footer>
+    </section>
   </body>
 </html>

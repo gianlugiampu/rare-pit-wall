@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "rare-pit-wall",
+  "productName": "Rare Pit Wall",
   "version": "0.1.0",
   "identifier": "com.rareproject.pitwall",
   "build": {
@@ -13,9 +13,13 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "rare-pit-wall",
-        "width": 800,
-        "height": 600
+        "label": "main",
+        "title": "Rare Pit Wall",
+        "width": 420,
+        "height": 560,
+        "resizable": false,
+        "maximizable": false,
+        "center": true
       }
     ],
     "security": {
@@ -24,13 +28,37 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "Rare Project Motorsport",
+    "shortDescription": "Il programma del team Rare Project Motorsport per iRacing",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ]
+    ],
+    "windows": {
+      "nsis": {
+        "languages": [
+          "Italian"
+        ],
+        "installMode": "currentUser"
+      }
+    },
+    "createUpdaterArtifacts": true
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IERFQzJFODQ0RDIxRDgwQTQKUldTa2dCM1NST2pDM2l6MzFnNk80eXpWTC83SE9XbmNyc1QvSjlEVzBvN1JodnJMRHdKdlNFakgK",
+      "endpoints": [
+        "https://github.com/gianlugiampu/rare-pit-wall/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }
