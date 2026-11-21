@@ -1,0 +1,45 @@
+# Costruisce l'installatore di Rare Pit Wall su Windows e lo pubblica nelle Release di GitHub.
+# Parte da solo quando si crea un tag "v0.1.0", "v0.2.0"… (oppure a mano da Actions → Run workflow).
+# Il programma installato controlla qui gli aggiornamenti (latest.json) e si aggiorna da solo.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - run: npm ci
+
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Chiave per firmare gli aggiornamenti: la inserisce Gianluca in Settings → Secrets → Actions
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        with:
+          tagName: v__VERSION__
+          releaseName: "Rare Pit Wall v__VERSION__"
+          releaseBody: "Scarica e apri il file «Rare Pit Wall_…_x64-setup.exe». Chi ha già il programma lo riceve da solo."
+          releaseDraft: false
+          prerelease: false
+          includeUpdaterJson: true
