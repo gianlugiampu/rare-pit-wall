@@ -62,11 +62,14 @@ pub struct Status {
     incidents: i32,
     speed_kmh: i32,
     gear: i32,
+    /// Esito dell'ultimo invio della classifica al sito (P2)
+    result: Option<String>,
 }
 
 struct Shared {
     status: Mutex<Status>,
     tray: Mutex<Option<TrayIcon>>,
+    result: Mutex<Option<String>>,
 }
 
 /// Messaggio nel registro di diagnosi del sito (se il PC è abbinato): così si vede cosa succede senza screenshot
@@ -89,6 +92,31 @@ fn http() -> reqwest::Client {
     reqwest::Client::builder().default_headers(headers).timeout(Duration::from_secs(15)).build().unwrap_or_default()
 }
 
+/// P2 · Manda al sito le informazioni di sessione con la classifica della gara: il sito trova l'evento e salva i risultati
+fn send_results(app: &AppHandle, shared: Arc<Shared>, yaml: String, session_num: i32, official: bool) {
+    let Some(token) = load_config(app).token else { return };
+    *shared.result.lock().unwrap() = Some("Invio la classifica al sito…".into());
+    tauri::async_runtime::spawn(async move {
+        let res = http()
+            .post(format!("{SITE}/api/pitwall/results"))
+            .bearer_auth(token)
+            .timeout(Duration::from_secs(60))
+            .json(&serde_json::json!({ "yaml": yaml, "sessionNum": session_num, "official": official, "live": true }))
+            .send()
+            .await;
+        let msg = match res {
+            Ok(r) => {
+                let ok = r.status().is_success();
+                let v: serde_json::Value = r.json().await.unwrap_or_default();
+                let text = v["message"].as_str().or(v["error"].as_str()).unwrap_or("").to_string();
+                if ok { format!("✓ {text}") } else { format!("Classifica non inviata: {text}") }
+            }
+            Err(_) => "Classifica non inviata: sito non raggiungibile".into(),
+        };
+        *shared.result.lock().unwrap() = Some(msg);
+    });
+}
+
 /// Legge iRacing due volte al secondo e manda lo stato alla finestra
 fn start_reader(app: AppHandle, shared: Arc<Shared>) {
     std::thread::spawn(move || {
@@ -99,6 +127,11 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
         let mut fuel_at_lap: Option<f32> = None;
         let mut fuel_per_lap: Vec<f32> = Vec::new();
         let mut was_connected = false;
+        // P2: classifica di fine gara
+        let mut cur_yaml = String::new();
+        let (mut subsession, mut session_num, mut official) = (String::new(), 0, false);
+        let mut sent: std::collections::HashSet<String> = Default::default();
+        let mut pending: Option<(String, String, i32)> = None; // gara finita ma classifica non ancora ufficiale
         loop {
             if sdk.is_none() {
                 sdk = irsdk::Irsdk::open();
@@ -117,6 +150,30 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         car = irsdk::yaml_value(&yaml, "CarScreenName", Some(&format!("CarIdx: {idx}\n"))).unwrap_or_default();
                         let num = s.get("SessionNum").map(|v| v.as_i32()).unwrap_or(0);
                         session = irsdk::yaml_value(&yaml, "SessionType", Some(&format!("SessionNum: {num}\n"))).unwrap_or_default();
+                        subsession = irsdk::yaml_value(&yaml, "SubSessionID", None).unwrap_or_default();
+                        official = irsdk::yaml_value(&yaml, "ResultsOfficial", Some(&format!("SessionNum: {num}\n"))).as_deref() == Some("1");
+                        session_num = num;
+                        cur_yaml = yaml;
+                    }
+                    // Gara finita: si manda la classifica appena iRacing la rende ufficiale (una volta sola per gara)
+                    if session == "Race" {
+                        let key = format!("{subsession}-{session_num}");
+                        let state = s.get("SessionState").map(|v| v.as_i32()).unwrap_or(0);
+                        if !sent.contains(&key) {
+                            if official {
+                                send_results(&app, shared.clone(), cur_yaml.clone(), session_num, true);
+                                sent.insert(key);
+                                pending = None;
+                            } else if state >= 5 && pending.as_ref().map(|p| p.1.len()) != Some(cur_yaml.len()) {
+                                // bandiera a scacchi: tengo da parte la classifica nel caso iRacing venga chiuso prima
+                                pending = Some((key, cur_yaml.clone(), session_num));
+                            }
+                        }
+                    } else if let Some((key, yaml, num)) = pending.take() {
+                        // si è passati a un'altra sessione senza classifica ufficiale: mando l'ultima vista
+                        if sent.insert(key) {
+                            send_results(&app, shared.clone(), yaml, num, false);
+                        }
                     }
                     st.track = track.clone();
                     st.car = car.clone();
@@ -154,6 +211,11 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                 // iRacing chiuso: si riapre la memoria al prossimo giro
                 sdk = None;
                 info_rev = -1;
+                if let Some((key, yaml, num)) = pending.take() {
+                    if sent.insert(key) {
+                        send_results(&app, shared.clone(), yaml, num, false);
+                    }
+                }
                 fuel_per_lap.clear();
                 fuel_at_lap = None;
             }
@@ -170,6 +232,7 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                 let token = load_config(&app).token;
                 site_log(token, if st.iracing { format!("collegato a iRacing · {} · {} · {}", st.track, st.car, st.session) } else { "iRacing chiuso".into() });
             }
+            st.result = shared.result.lock().unwrap().clone();
             let changed = *shared.status.lock().unwrap() != st;
             if changed {
                 *shared.status.lock().unwrap() = st.clone();
@@ -279,7 +342,7 @@ fn show_window(app: &AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let shared = Arc::new(Shared { status: Mutex::new(Status::default()), tray: Mutex::new(None) });
+    let shared = Arc::new(Shared { status: Mutex::new(Status::default()), tray: Mutex::new(None), result: Mutex::new(None) });
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app)))
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--nascosto"])))

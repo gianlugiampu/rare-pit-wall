@@ -7,6 +7,7 @@ const SITE = "https://rare-project-motorsport.vercel.app";
 type Status = {
   iracing: boolean; onTrack: boolean; track: string; car: string; session: string;
   lap: number; position: number; fuelL: number; fuelLaps: number | null; incidents: number; speedKmh: number; gear: number;
+  result: string | null;
 };
 type AppState = { paired: boolean; driver: string | null; version: string; status: Status };
 
@@ -25,6 +26,10 @@ function showPaired(paired: boolean, driver: string | null) {
 }
 
 function render(s: Status) {
+  const res = $("result");
+  res.hidden = !s.result;
+  res.textContent = s.result ?? "";
+  res.className = s.result && !s.result.startsWith("✓") && !s.result.startsWith("Invio") ? "msg err" : "msg ok";
   const dot = $("dot");
   if (!s.iracing) {
     dot.style.background = "var(--ink600)";
