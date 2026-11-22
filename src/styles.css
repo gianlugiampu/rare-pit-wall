@@ -21,9 +21,9 @@ h1 { font-size: 22px; margin-top: 4px; }
 .txt { margin-top: 8px; }
 .txt b { color: #fff; }
 form { display: flex; gap: 8px; margin-top: 16px; }
-input { flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; color: #fff; padding: 10px 12px;
+#code { flex: 1; min-width: 0; background: var(--card); border: 1px solid var(--line); border-radius: 8px; color: #fff; padding: 10px 12px;
   font: 700 22px "Good Timing", monospace; letter-spacing: .35em; text-transform: uppercase; text-align: center; }
-input:focus { outline: none; border-color: var(--main); }
+#code:focus { outline: none; border-color: var(--main); }
 button { background: var(--main); color: #fff; border: 0; border-radius: 8px; padding: 0 18px; font: 700 14px Montserrat, "Segoe UI", sans-serif; cursor: pointer; }
 button:disabled { opacity: .5; cursor: wait; }
 .msg { min-height: 20px; margin-top: 8px; font-size: 13px; }
@@ -49,8 +49,8 @@ footer { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line);
 .live-box { margin-top: 14px; padding: 10px 12px; border: 1px solid var(--p700); background: rgba(150, 0, 255, .1); border-radius: 8px; }
 .live-row { display: flex; align-items: center; justify-content: space-between; color: #fff; font-weight: 700; }
 .small-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; }
-.small-row input { accent-color: var(--main); }
-.switch { appearance: none; width: 38px; height: 22px; border-radius: 11px; background: var(--ink600); position: relative; cursor: pointer; transition: background .15s; }
+.small-row input { accent-color: var(--main); width: 16px; height: 16px; margin: 0; }
+.switch { appearance: none; flex: none; margin: 0; border: 0; width: 38px; height: 22px; border-radius: 11px; background: var(--ink600); position: relative; cursor: pointer; transition: background .15s; }
 .switch::after { content: ""; position: absolute; left: 3px; top: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; transition: left .15s; }
 .switch:checked { background: var(--main); }
 .switch:checked::after { left: 19px; }
