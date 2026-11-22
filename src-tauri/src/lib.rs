@@ -3,6 +3,7 @@
 //! si abbina all'account del pilota con un codice preso dal Profilo dell'area piloti.
 
 mod dash;
+mod engineer;
 mod irsdk;
 
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,17 @@ const TRAY_ON: &[u8] = include_bytes!("../icons/tray-on.png");
 struct Config {
     token: Option<String>,
     driver: Option<String>,
+    /// P4: impostazioni dell'ingegnere a voce
+    #[serde(default)]
+    engineer: engineer::Settings,
+}
+
+/// Toglie l'abbinamento ma tiene le impostazioni (voce, volume…)
+fn clear_pairing(app: &AppHandle) {
+    let mut c = load_config(app);
+    c.token = None;
+    c.driver = None;
+    save_config(app, &c);
 }
 
 fn config_path(app: &AppHandle) -> Option<std::path::PathBuf> {
@@ -74,6 +86,10 @@ struct Shared {
     /// P3: dati del cruscotto sul telefono e indirizzo del mini sito sulla rete di casa
     dash: Arc<Mutex<dash::Dash>>,
     dash_url: Mutex<Option<String>>,
+    /// P4: impostazioni dell'ingegnere, voci disponibili, frase di prova da dire subito
+    engineer: Mutex<engineer::Settings>,
+    voices: Mutex<Vec<engineer::VoiceInfo>>,
+    say: Mutex<Option<String>>,
 }
 
 /// Messaggio nel registro di diagnosi del sito (se il PC è abbinato): così si vede cosa succede senza screenshot
@@ -138,6 +154,10 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
         let (mut subsession, mut session_num, mut official) = (String::new(), 0, false);
         let mut sent: std::collections::HashSet<String> = Default::default();
         let mut pending: Option<(String, String, i32)> = None; // gara finita ma classifica non ancora ufficiale
+        // P4: ingegnere a voce (la voce di Windows vive in questo thread)
+        let mut eng = engineer::Engineer::new();
+        *shared.voices.lock().unwrap() = eng.voices();
+        let mut inc_limit: Option<i32> = None;
         loop {
             if sdk.is_none() {
                 sdk = irsdk::Irsdk::open();
@@ -162,6 +182,7 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         session_num = race.map(|r| r.0).unwrap_or(num);
                         official = race.map(|r| r.1).unwrap_or(false);
                         cars = (yaml.matches("CarIsPaceCar: 0").count() as i32 - yaml.matches("IsSpectator: 1").count() as i32).max(0);
+                        inc_limit = irsdk::yaml_value(&yaml, "IncidentLimit", None).and_then(|v| v.parse().ok());
                         cur_yaml = yaml;
                     }
                     // Classifica ufficiale della gara: si manda subito, una volta sola per gara
@@ -237,6 +258,47 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         track: st.track.clone(),
                         car: st.car.clone(),
                     };
+                    // P4: distacchi da chi precede e da chi segue (tempo dietro al leader, CarIdxF2Time)
+                    let me = s.get("PlayerCarIdx").map(|v| v.as_i32()).unwrap_or(-1);
+                    let (mut gap_ahead, mut gap_behind) = (None, None);
+                    if me >= 0 && st.position > 0 {
+                        let my_f2 = s.get_at("CarIdxF2Time", me as usize).map(|v| v.as_f64() as f32).unwrap_or(0.0);
+                        for i in 0..64 {
+                            let Some(p) = s.get_at("CarIdxPosition", i).map(|v| v.as_i32()) else { break };
+                            let f2 = s.get_at("CarIdxF2Time", i).map(|v| v.as_f64() as f32).unwrap_or(0.0);
+                            if p == st.position - 1 {
+                                gap_ahead = Some(my_f2 - f2).filter(|g| *g > 0.0 && *g < 600.0);
+                            } else if p == st.position + 1 {
+                                gap_behind = Some(f2 - my_f2).filter(|g| *g > 0.0 && *g < 600.0);
+                            }
+                        }
+                    }
+                    let laps_remain = s.get("SessionLapsRemainEx").map(|v| v.as_i32()).filter(|v| *v >= 0 && *v < 32000);
+                    let time_remain = s.get("SessionTimeRemain").map(|v| v.as_f64()).filter(|v| *v > 0.0 && *v < 86_400.0);
+                    let tele = engineer::Tele {
+                        session: session.clone(),
+                        on_track: st.on_track,
+                        on_pit_road: s.get("OnPitRoad").map(|v| v.as_bool()).unwrap_or(false),
+                        lap_completed: s.get("LapCompleted").map(|v| v.as_i32()).unwrap_or(0),
+                        last_lap: f(s, "LapLastLapTime"),
+                        best_lap: f(s, "LapBestLapTime"),
+                        fuel_l: st.fuel_l,
+                        fuel_per_lap: if fuel_per_lap.is_empty() { None } else { Some(fuel_per_lap.iter().sum::<f32>() / fuel_per_lap.len() as f32) },
+                        position: st.position,
+                        laps_remain,
+                        time_remain: if laps_remain.is_some() { None } else { time_remain },
+                        flags: s.get("SessionFlags").map(|v| v.as_i32() as u32).unwrap_or(0),
+                        incidents: st.incidents,
+                        inc_limit,
+                        // CarLeftRight: 0 spento, 1 libero, 2+ auto affiancate
+                        car_alongside: s.get("CarLeftRight").map(|v| v.as_i32() >= 2).unwrap_or(false),
+                        throttle: f(s, "Throttle"),
+                        steer: f(s, "SteeringWheelAngle"),
+                        gap_ahead,
+                        gap_behind,
+                    };
+                    let settings = shared.engineer.lock().unwrap().clone();
+                    eng.update(&tele, &settings);
                 } else {
                     close = true;
                 }
@@ -270,6 +332,13 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                 *shared.dash.lock().unwrap() = dash::Dash::default();
             }
             // La finestrella si aggiorna due volte al secondo; il cruscotto 20 volte al secondo
+            // P4: prova della voce dalla finestrella
+            let test = shared.say.lock().unwrap().take();
+            if let Some(text) = test {
+                let settings = shared.engineer.lock().unwrap().clone();
+                eng.apply(&settings);
+                eng.say_now(&text);
+            }
             tick = tick.wrapping_add(1);
             if tick % 10 == 0 {
                 st.result = shared.result.lock().unwrap().clone();
@@ -304,6 +373,31 @@ fn get_state(app: AppHandle, shared: tauri::State<Arc<Shared>>) -> AppState {
     AppState { paired: c.token.is_some(), driver: c.driver, version: VERSION.into(), status: shared.status.lock().unwrap().clone(), dash_url, dash_qr }
 }
 
+// ——— P4: ingegnere a voce ———
+#[derive(Serialize)]
+struct EngineerState {
+    settings: engineer::Settings,
+    voices: Vec<engineer::VoiceInfo>,
+}
+
+#[tauri::command]
+fn get_engineer(shared: tauri::State<Arc<Shared>>) -> EngineerState {
+    EngineerState { settings: shared.engineer.lock().unwrap().clone(), voices: shared.voices.lock().unwrap().clone() }
+}
+
+#[tauri::command]
+fn set_engineer(app: AppHandle, shared: tauri::State<Arc<Shared>>, settings: engineer::Settings) {
+    *shared.engineer.lock().unwrap() = settings.clone();
+    let mut c = load_config(&app);
+    c.engineer = settings;
+    save_config(&app, &c);
+}
+
+#[tauri::command]
+fn test_voice(shared: tauri::State<Arc<Shared>>) {
+    *shared.say.lock().unwrap() = Some("Ciao, sono il tuo ingegnere. 3 giri di benzina. Davanti a 1 e 2, recuperi 3 decimi.".into());
+}
+
 /// Abbina il PC all'account con il codice di 6 caratteri del Profilo
 #[tauri::command]
 async fn pair(app: AppHandle, code: String) -> Result<String, String> {
@@ -321,7 +415,10 @@ async fn pair(app: AppHandle, code: String) -> Result<String, String> {
     }
     let token = body["token"].as_str().ok_or("Risposta non valida dal sito")?.to_string();
     let driver = body["driver"].as_str().unwrap_or("").to_string();
-    save_config(&app, &Config { token: Some(token.clone()), driver: Some(driver.clone()) });
+    let mut c = load_config(&app);
+    c.token = Some(token.clone());
+    c.driver = Some(driver.clone());
+    save_config(&app, &c);
     site_log(Some(token), format!("abbinato (versione {VERSION})"));
     Ok(driver)
 }
@@ -329,7 +426,7 @@ async fn pair(app: AppHandle, code: String) -> Result<String, String> {
 /// Scollega questo PC (si potrà riabbinare con un nuovo codice)
 #[tauri::command]
 fn unpair(app: AppHandle) {
-    save_config(&app, &Config::default());
+    clear_pairing(&app);
 }
 
 /// Controlla che l'abbinamento sia ancora valido (se il PC è stato scollegato dal sito, si torna all'abbinamento)
@@ -339,7 +436,7 @@ async fn check_pairing(app: AppHandle) -> bool {
     let res = http().get(format!("{SITE}/api/pitwall/me")).bearer_auth(token).send().await;
     match res {
         Ok(r) if r.status() == reqwest::StatusCode::UNAUTHORIZED => {
-            save_config(&app, &Config::default());
+            clear_pairing(&app);
             false
         }
         _ => true, // senza internet si resta abbinati
@@ -387,14 +484,14 @@ fn show_window(app: &AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let shared = Arc::new(Shared { status: Mutex::new(Status::default()), tray: Mutex::new(None), result: Mutex::new(None), dash: Default::default(), dash_url: Mutex::new(None) });
+    let shared = Arc::new(Shared { status: Mutex::new(Status::default()), tray: Mutex::new(None), result: Mutex::new(None), dash: Default::default(), dash_url: Mutex::new(None), engineer: Default::default(), voices: Default::default(), say: Mutex::new(None) });
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app)))
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--nascosto"])))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(shared.clone())
-        .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing])
+        .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice])
         .setup(move |app| {
             // Parte con Windows (si può togliere da Impostazioni → App → Avvio)
             {
@@ -428,6 +525,8 @@ pub fn run() {
                     let _ = w.hide();
                 }
             }
+            // P4: impostazioni dell'ingegnere salvate sul PC
+            *shared.engineer.lock().unwrap() = load_config(app.handle()).engineer;
             // P3: cruscotto sul telefono (mini sito sulla rete di casa)
             *shared.dash_url.lock().unwrap() = dash::start(shared.dash.clone());
             start_reader(app.handle().clone(), shared.clone());

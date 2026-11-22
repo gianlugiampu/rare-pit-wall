@@ -11,6 +11,10 @@ type Status = {
 };
 type AppState = { paired: boolean; driver: string | null; version: string; status: Status; dashUrl: string | null; dashQr: string | null };
 
+type EngSettings = { enabled: boolean; voice: string | null; volume: number; fuel: boolean; laptime: boolean; gaps: boolean; flags: boolean; race: boolean };
+type EngState = { settings: EngSettings; voices: { id: string; name: string }[] };
+const FLAGS = ["enabled", "laptime", "fuel", "gaps", "flags", "race"] as const;
+
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const num = (x: number, d = 1) => x.toFixed(d).replace(".", ",");
 
@@ -91,6 +95,28 @@ window.addEventListener("DOMContentLoaded", async () => {
     } finally {
       btn.disabled = false;
     }
+  });
+  // Ingegnere a voce: impostazioni salvate sul PC a ogni modifica
+  const eng = await invoke<EngState>("get_engineer");
+  const sel = $<HTMLSelectElement>("e-voice");
+  sel.innerHTML = eng.voices.map((v) => `<option value="${v.id}">${v.name.replace(/^Microsoft /, "")}</option>`).join("") || "<option>Nessuna voce trovata</option>";
+  if (eng.settings.voice) sel.value = eng.settings.voice;
+  $<HTMLInputElement>("e-volume").value = String(eng.settings.volume);
+  for (const k of FLAGS) $<HTMLInputElement>(`e-${k}`).checked = eng.settings[k];
+  const saveEng = () => {
+    const settings: EngSettings = {
+      ...eng.settings,
+      voice: sel.value || null,
+      volume: Number($<HTMLInputElement>("e-volume").value),
+    };
+    for (const k of FLAGS) settings[k] = $<HTMLInputElement>(`e-${k}`).checked;
+    eng.settings = settings;
+    return invoke("set_engineer", { settings });
+  };
+  $("eng").addEventListener("change", saveEng);
+  $("e-test").addEventListener("click", async () => {
+    await saveEng();
+    await invoke("test_voice");
   });
   $("open-profile").addEventListener("click", (e) => {
     e.preventDefault();
