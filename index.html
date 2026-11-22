@@ -37,7 +37,7 @@
           <div class="feat"><span>Risultati automatici</span><em>attivo</em></div>
           <div class="feat"><span>Cruscotto sul telefono</span><em>attivo</em></div>
           <div class="feat"><span>Ingegnere a voce</span><em>attivo</em></div>
-          <div class="feat"><span>Pit wall (endurance)</span><em class="off">in arrivo</em></div>
+          <div class="feat"><span>Pit wall dal vivo</span><em>attivo</em></div>
         </div>
       </div>
       <div id="live" hidden>
@@ -57,6 +57,12 @@
           <p class="small">Inquadra il codice con il telefono (stessa Wi-Fi del PC), poi gira il telefono in orizzontale.</p>
           <p id="dash-url" class="url"></p>
         </div>
+      </div>
+      <div class="live-box">
+        <label class="live-row"><span>Pit wall in diretta</span><input type="checkbox" id="live-manual" class="switch" /></label>
+        <label class="row small-row"><input type="checkbox" id="live-auto" /> Accendi da solo nelle gare del calendario</label>
+        <p id="live-text" class="small"></p>
+        <ul id="live-msgs" class="live-msgs"></ul>
       </div>
       <p id="result" class="msg ok" hidden></p>
       <details id="eng" class="eng">

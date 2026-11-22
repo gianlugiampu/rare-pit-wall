@@ -76,6 +76,8 @@ struct Output {
     dir: PathBuf,
     serena: bool,
     volume: f32,
+    /// P5: messaggi del team dal pit wall (restano anche se cambia la sessione)
+    radio: VecDeque<(String, Instant)>,
 }
 
 impl Output {
@@ -136,7 +138,7 @@ pub struct Engineer {
 impl Engineer {
     /// `dir`: cartella dove si scarica la voce Serena
     pub fn new(dir: PathBuf) -> Engineer {
-        Engineer::new_with(Output { tts: tts::Tts::default().ok(), piper: None, dir, serena: false, volume: 0.8 }, None)
+        Engineer::new_with(Output { tts: tts::Tts::default().ok(), piper: None, dir, serena: false, volume: 0.8, radio: VecDeque::new() }, None)
     }
 
     /// Voci italiane per prime (le altre servono poco)
@@ -185,6 +187,11 @@ impl Engineer {
         self.applied = Some(s.clone());
     }
 
+    /// P5: messaggio del team dal pit wall (detto appena si può, prima degli altri)
+    pub fn radio(&mut self, text: String) {
+        self.out.radio.push_back((text, Instant::now()));
+    }
+
     /// Dice subito una frase (prova della voce dalla finestrella)
     pub fn say_now(&mut self, text: &str) {
         if self.out.speak(text, true) {
@@ -201,7 +208,7 @@ impl Engineer {
     }
 
     fn reset(&mut self, session: &str) {
-        let out = std::mem::replace(&mut self.out, Output { tts: None, piper: None, dir: PathBuf::new(), serena: false, volume: 0.8 });
+        let out = std::mem::replace(&mut self.out, Output { tts: None, piper: None, dir: PathBuf::new(), serena: false, volume: 0.8, radio: VecDeque::new() });
         let applied = self.applied.take();
         *self = Engineer::new_with(out, applied);
         self.session = session.to_string();
@@ -249,6 +256,7 @@ impl Engineer {
             self.queue.clear();
             self.prev_lap = t.lap_completed;
             self.prev_flags = t.flags;
+            self.speak_if_possible(t); // i messaggi del team si dicono comunque
             return;
         }
 
@@ -423,6 +431,7 @@ impl Engineer {
     fn speak_if_possible(&mut self, t: &Tele) {
         // via i messaggi vecchi (gli avvisi importanti restano di più)
         self.queue.retain(|m| m.at.elapsed() < Duration::from_secs(if m.important { 90 } else { 20 }));
+        self.out.radio.retain(|(_, at)| at.elapsed() < Duration::from_secs(120));
         let busy = self.out.is_speaking();
         if busy {
             self.last_end = Instant::now();
@@ -442,8 +451,12 @@ impl Engineer {
         if t.car_alongside || !(straight || parked) {
             return;
         }
-        if let Some(m) = self.queue.pop_front() {
-            self.out.speak(&m.text, false);
+        let next = match self.out.radio.pop_front() {
+            Some((text, _)) => Some(text),
+            None => self.queue.pop_front().map(|m| m.text),
+        };
+        if let Some(text) = next {
+            self.out.speak(&text, false);
             self.speaking_since = Some(Instant::now());
             self.last_end = Instant::now();
         }

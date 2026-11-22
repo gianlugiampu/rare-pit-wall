@@ -8,8 +8,9 @@ type Status = {
   iracing: boolean; onTrack: boolean; track: string; car: string; session: string;
   lap: number; position: number; fuelL: number; fuelLaps: number | null; incidents: number; speedKmh: number; gear: number;
   result: string | null;
+  live: { on: boolean; manual: boolean; auto: boolean; text: string; messages: string[] };
 };
-type AppState = { paired: boolean; driver: string | null; version: string; status: Status; dashUrl: string | null; dashQr: string | null };
+type AppState = { paired: boolean; driver: string | null; version: string; status: Status; dashUrl: string | null; dashQr: string | null; liveAuto: boolean };
 
 type EngSettings = { enabled: boolean; voice: string | null; volume: number; fuel: boolean; laptime: boolean; gaps: boolean; flags: boolean; race: boolean };
 type VoiceStatus = { state: string; percent: number; message: string };
@@ -31,6 +32,12 @@ function showPaired(paired: boolean, driver: string | null) {
 }
 
 function render(s: Status) {
+  // Pit wall dal vivo
+  if (s.live) {
+    $<HTMLInputElement>("live-manual").checked = s.live.on;
+    $("live-text").textContent = s.iracing ? s.live.text : "Si attiva quando sei in una sessione di iRacing.";
+    $("live-msgs").innerHTML = s.live.messages.map((m) => `<li>🔊 ${m.replace(/</g, "&lt;")}</li>`).join("");
+  }
   const res = $("result");
   res.hidden = !s.result;
   res.textContent = s.result ?? "";
@@ -127,6 +134,19 @@ window.addEventListener("DOMContentLoaded", async () => {
   $("e-test").addEventListener("click", async () => {
     await saveEng();
     await invoke("test_voice");
+  });
+  // Pit wall: interruttore a mano e accensione automatica nelle gare del calendario
+  $<HTMLInputElement>("live-auto").checked = st.liveAuto;
+  $("live-auto").addEventListener("change", (e) => invoke("set_live_auto", { on: (e.target as HTMLInputElement).checked }));
+  $("live-manual").addEventListener("change", (e) => {
+    const on = (e.target as HTMLInputElement).checked;
+    invoke("set_live_manual", { on });
+    // spento a mano mentre era acceso in automatico: si spegne anche l'automatico (si riaccende dalla casella sotto)
+    const auto = $<HTMLInputElement>("live-auto");
+    if (!on && auto.checked) {
+      auto.checked = false;
+      invoke("set_live_auto", { on: false });
+    }
   });
   $("open-profile").addEventListener("click", (e) => {
     e.preventDefault();

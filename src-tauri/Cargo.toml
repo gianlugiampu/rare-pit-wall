@@ -1,6 +1,6 @@
 [package]
 name = "rare-pit-wall"
-version = "0.5.1"
+version = "0.6.0"
 description = "Rare Pit Wall · programma per Windows del team Rare Project Motorsport"
 authors = ["Rare Project Motorsport"]
 edition = "2024"

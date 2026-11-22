@@ -5,6 +5,7 @@
 mod dash;
 mod engineer;
 mod irsdk;
+mod live;
 mod voice;
 
 use serde::{Deserialize, Serialize};
@@ -32,6 +33,9 @@ struct Config {
     /// P4: impostazioni dell'ingegnere a voce
     #[serde(default)]
     engineer: engineer::Settings,
+    /// P5: accensione automatica del pit wall nelle gare del calendario (salvato «spento», così di base è acceso)
+    #[serde(default)]
+    pitwall_auto_off: bool,
 }
 
 /// Toglie l'abbinamento ma tiene le impostazioni (voce, volume…)
@@ -78,6 +82,8 @@ pub struct Status {
     gear: i32,
     /// Esito dell'ultimo invio della classifica al sito (P2)
     result: Option<String>,
+    /// P5: stato del pit wall dal vivo
+    live: LiveInfo,
 }
 
 struct Shared {
@@ -92,6 +98,65 @@ struct Shared {
     voices: Mutex<Vec<engineer::VoiceInfo>>,
     say: Mutex<Option<String>>,
     voice_status: Arc<Mutex<voice::VoiceStatus>>,
+    /// P5: pit wall dal vivo
+    live_manual: Mutex<bool>,
+    live_event: Mutex<Option<String>>,
+    live_info: Mutex<LiveInfo>,
+    radio: Mutex<Vec<String>>,
+}
+
+#[derive(Serialize, Clone, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct LiveInfo {
+    on: bool,
+    manual: bool,
+    auto: bool,
+    text: String,
+    messages: Vec<String>,
+}
+
+/// P5 · chiede al sito se la sessione è una gara del calendario (accensione automatica del pit wall)
+fn live_probe(app: &AppHandle, shared: Arc<Shared>, subsession: i64, session: String) {
+    let Some(token) = load_config(app).token else { return };
+    tauri::async_runtime::spawn(async move {
+        let res = http()
+            .post(format!("{SITE}/api/pitwall/live"))
+            .bearer_auth(token)
+            .json(&serde_json::json!({ "probe": true, "subsession": subsession, "session": session, "auto": true }))
+            .send()
+            .await;
+        if let Ok(r) = res {
+            let v: serde_json::Value = r.json().await.unwrap_or_default();
+            *shared.live_event.lock().unwrap() = if v["active"].as_bool() == Some(true) { v["event"].as_str().map(String::from) } else { None };
+        }
+    });
+}
+
+/// P5 · manda i dati al sito e riceve i messaggi del team
+fn live_send(app: &AppHandle, shared: Arc<Shared>, body: serde_json::Value) {
+    let Some(token) = load_config(app).token else { return };
+    tauri::async_runtime::spawn(async move {
+        let res = http().post(format!("{SITE}/api/pitwall/live")).bearer_auth(token).json(&body).send().await;
+        let mut info = shared.live_info.lock().unwrap().clone();
+        match res {
+            Ok(r) if r.status().is_success() => {
+                let v: serde_json::Value = r.json().await.unwrap_or_default();
+                let event = v["event"].as_str().unwrap_or("fuori calendario").to_string();
+                info.text = format!("In diretta · {event}");
+                for m in v["messages"].as_array().cloned().unwrap_or_default() {
+                    let (who, text) = (m["author"].as_str().unwrap_or("Box"), m["text"].as_str().unwrap_or(""));
+                    if text.is_empty() {
+                        continue;
+                    }
+                    shared.radio.lock().unwrap().push(format!("Dal box: {text}"));
+                    info.messages.insert(0, format!("{who}: «{text}»"));
+                    info.messages.truncate(3);
+                }
+            }
+            _ => info.text = "Pit wall: sito non raggiungibile, riprovo".into(),
+        }
+        *shared.live_info.lock().unwrap() = info;
+    });
 }
 
 /// Messaggio nel registro di diagnosi del sito (se il PC è abbinato): così si vede cosa succede senza screenshot
@@ -160,6 +225,9 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
         let mut eng = engineer::Engineer::new(voice_dir(&app));
         *shared.voices.lock().unwrap() = eng.voices();
         let mut inc_limit: Option<i32> = None;
+        // P5: pit wall dal vivo
+        let mut tracker = live::Tracker::default();
+        let mut live_key = String::new();
         loop {
             if sdk.is_none() {
                 sdk = irsdk::Irsdk::open();
@@ -185,6 +253,15 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         official = race.map(|r| r.1).unwrap_or(false);
                         cars = (yaml.matches("CarIsPaceCar: 0").count() as i32 - yaml.matches("IsSpectator: 1").count() as i32).max(0);
                         inc_limit = irsdk::yaml_value(&yaml, "IncidentLimit", None).and_then(|v| v.parse().ok());
+                        tracker.on_session_info(&yaml);
+                        // nuova sessione: stint da zero e domanda al sito se è una gara del calendario
+                        let key = format!("{subsession}-{num}");
+                        if key != live_key {
+                            live_key = key;
+                            tracker.reset();
+                            *shared.live_event.lock().unwrap() = None;
+                            live_probe(&app, shared.clone(), subsession.parse().unwrap_or(0), session.clone());
+                        }
                         cur_yaml = yaml;
                     }
                     // Classifica ufficiale della gara: si manda subito, una volta sola per gara
@@ -301,6 +378,40 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                     };
                     let settings = shared.engineer.lock().unwrap().clone();
                     eng.update(&tele, &settings);
+                    // P5: pit wall dal vivo ogni 2 secondi (acceso a mano, o in automatico nelle gare del calendario)
+                    let manual = *shared.live_manual.lock().unwrap();
+                    let auto = !load_config_cached(&app, tick).pitwall_auto_off;
+                    let event = shared.live_event.lock().unwrap().clone();
+                    let on = manual || (auto && event.is_some());
+                    if tick % 40 == 0 {
+                        if on {
+                            let fpl = if fuel_per_lap.is_empty() { None } else { Some(fuel_per_lap.iter().sum::<f32>() / fuel_per_lap.len() as f32) };
+                            let data = tracker.snapshot(s, st.position, st.lap, st.fuel_l, fpl, st.incidents, cars);
+                            let body = serde_json::json!({
+                                "manual": manual, "auto": auto, "subsession": subsession.parse::<i64>().unwrap_or(0),
+                                "carIdx": tracker.car_idx, "session": session, "track": track, "car": car, "carNumber": tracker.car_number, "data": data,
+                            });
+                            live_send(&app, shared.clone(), body);
+                        } else if auto && tick % 6000 == 0 {
+                            // ogni 5 minuti si richiede (una gara del calendario può iniziare più tardi)
+                            live_probe(&app, shared.clone(), subsession.parse().unwrap_or(0), session.clone());
+                        }
+                    }
+                    {
+                        let mut li = shared.live_info.lock().unwrap();
+                        li.on = on;
+                        li.manual = manual;
+                        li.auto = auto;
+                        if !on {
+                            li.text = if auto { "Si accende da solo nelle gare del calendario".into() } else { "Spento".into() };
+                        } else if li.text.is_empty() || li.text.starts_with("Si accende") || li.text == "Spento" {
+                            li.text = format!("In diretta · {}", event.clone().unwrap_or_else(|| "acceso a mano".into()));
+                        }
+                    }
+                    let radio: Vec<String> = shared.radio.lock().unwrap().drain(..).collect();
+                    for r in radio {
+                        eng.radio(r);
+                    }
                 } else {
                     close = true;
                 }
@@ -344,6 +455,7 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
             tick = tick.wrapping_add(1);
             if tick % 10 == 0 {
                 st.result = shared.result.lock().unwrap().clone();
+                st.live = shared.live_info.lock().unwrap().clone();
                 let changed = *shared.status.lock().unwrap() != st;
                 if changed {
                     *shared.status.lock().unwrap() = st.clone();
@@ -365,6 +477,7 @@ struct AppState {
     status: Status,
     dash_url: Option<String>,
     dash_qr: Option<String>,
+    live_auto: bool,
 }
 
 #[tauri::command]
@@ -372,7 +485,7 @@ fn get_state(app: AppHandle, shared: tauri::State<Arc<Shared>>) -> AppState {
     let c = load_config(&app);
     let dash_url = shared.dash_url.lock().unwrap().clone();
     let dash_qr = dash_url.as_deref().map(dash::qr_svg);
-    AppState { paired: c.token.is_some(), driver: c.driver, version: VERSION.into(), status: shared.status.lock().unwrap().clone(), dash_url, dash_qr }
+    AppState { paired: c.token.is_some(), driver: c.driver, version: VERSION.into(), status: shared.status.lock().unwrap().clone(), dash_url, dash_qr, live_auto: !c.pitwall_auto_off }
 }
 
 // ——— P4: ingegnere a voce ———
@@ -419,6 +532,35 @@ fn install_serena(app: &AppHandle, shared: &Arc<Shared>) {
             }
         }
     });
+}
+
+/// P5 · pit wall acceso/spento a mano (vale fino alla chiusura del programma)
+#[tauri::command]
+fn set_live_manual(shared: tauri::State<Arc<Shared>>, on: bool) {
+    *shared.live_manual.lock().unwrap() = on;
+}
+
+/// P5 · accensione automatica nelle gare del calendario (salvata sul PC)
+#[tauri::command]
+fn set_live_auto(app: AppHandle, on: bool) {
+    let mut c = load_config(&app);
+    c.pitwall_auto_off = !on;
+    save_config(&app, &c);
+    CONFIG_CACHE.lock().unwrap().take();
+}
+
+/// Impostazioni lette dal disco al massimo una volta al secondo (la lettura di iRacing gira 20 volte al secondo)
+static CONFIG_CACHE: Mutex<Option<(u32, Config)>> = Mutex::new(None);
+fn load_config_cached(app: &AppHandle, tick: u32) -> Config {
+    let mut cache = CONFIG_CACHE.lock().unwrap();
+    if let Some((t, c)) = cache.as_ref() {
+        if tick.wrapping_sub(*t) < 20 {
+            return c.clone();
+        }
+    }
+    let c = load_config(app);
+    *cache = Some((tick, c.clone()));
+    c
 }
 
 #[tauri::command]
@@ -557,14 +699,14 @@ fn show_window(app: &AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let shared = Arc::new(Shared { status: Mutex::new(Status::default()), tray: Mutex::new(None), result: Mutex::new(None), dash: Default::default(), dash_url: Mutex::new(None), engineer: Default::default(), voices: Default::default(), say: Mutex::new(None), voice_status: Default::default() });
+    let shared = Arc::new(Shared { status: Mutex::new(Status::default()), tray: Mutex::new(None), result: Mutex::new(None), dash: Default::default(), dash_url: Mutex::new(None), engineer: Default::default(), voices: Default::default(), say: Mutex::new(None), voice_status: Default::default(), live_manual: Mutex::new(false), live_event: Mutex::new(None), live_info: Default::default(), radio: Default::default() });
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app)))
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--nascosto"])))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(shared.clone())
-        .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice])
+        .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto])
         .setup(move |app| {
             // Parte con Windows (si può togliere da Impostazioni → App → Avvio)
             {
