@@ -488,31 +488,58 @@ async fn check_pairing(app: AppHandle) -> bool {
     }
 }
 
-/// Aggiornamenti automatici da GitHub: all'avvio e ogni 6 ore, mai mentre iRacing è aperto
-fn start_updater(app: AppHandle, shared: Arc<Shared>) {
+/// Ultimo controllo degli aggiornamenti (per non ripeterlo a ogni apertura della finestra)
+static LAST_UPDATE_CHECK: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+/// Controlla su GitHub se c'è una versione nuova e la installa (mai mentre iRacing è aperto).
+/// `manual`: chiesto dal menu dell'icona → il risultato si vede nella finestrella.
+async fn check_update(app: AppHandle, shared: Arc<Shared>, manual: bool) {
     use tauri_plugin_updater::UpdaterExt;
+    *LAST_UPDATE_CHECK.lock().unwrap() = Some(std::time::Instant::now());
+    let tell = |m: &str| {
+        if manual {
+            *shared.result.lock().unwrap() = Some(m.to_string());
+        }
+    };
+    if shared.status.lock().unwrap().iracing {
+        tell("Aggiornamenti: chiudi iRacing e riprova");
+        return;
+    }
+    let Ok(updater) = app.updater() else { return };
+    match updater.check().await {
+        Ok(Some(update)) => {
+            tell(&format!("Installo la versione {}…", update.version));
+            site_log(load_config(&app).token, format!("aggiornamento {VERSION} → {}", update.version));
+            if update.download_and_install(|_, _| {}, || {}).await.is_ok() {
+                app.restart();
+            }
+        }
+        Ok(None) => tell(&format!("✓ Hai già l'ultima versione ({VERSION})")),
+        Err(e) => {
+            tell("Aggiornamenti: GitHub non raggiungibile, riprova più tardi");
+            site_log(load_config(&app).token, format!("controllo aggiornamenti non riuscito: {e}"));
+        }
+    }
+}
+
+/// Aggiornamenti automatici: all'avvio, ogni 6 ore e quando si apre la finestra (al massimo ogni 10 minuti)
+fn start_updater(app: AppHandle, shared: Arc<Shared>) {
     tauri::async_runtime::spawn(async move {
         tokio_sleep(Duration::from_secs(20)).await;
         loop {
-            let busy = shared.status.lock().unwrap().iracing;
-            if !busy {
-                if let Ok(updater) = app.updater() {
-                    match updater.check().await {
-                        Ok(Some(update)) => {
-                            let token = load_config(&app).token;
-                            site_log(token, format!("aggiornamento {VERSION} → {}", update.version));
-                            if update.download_and_install(|_, _| {}, || {}).await.is_ok() {
-                                app.restart();
-                            }
-                        }
-                        Ok(None) => {}
-                        Err(e) => site_log(load_config(&app).token, format!("controllo aggiornamenti non riuscito: {e}")),
-                    }
-                }
-            }
+            check_update(app.clone(), shared.clone(), false).await;
             tokio_sleep(Duration::from_secs(6 * 3600)).await;
         }
     });
+}
+
+fn check_update_soon(app: &AppHandle, manual: bool) {
+    let recent = LAST_UPDATE_CHECK.lock().unwrap().map(|t| t.elapsed() < Duration::from_secs(600)).unwrap_or(false);
+    if recent && !manual {
+        return;
+    }
+    let shared = app.state::<Arc<Shared>>().inner().clone();
+    tauri::async_runtime::spawn(check_update(app.clone(), shared, manual));
 }
 
 async fn tokio_sleep(d: Duration) {
@@ -525,6 +552,7 @@ fn show_window(app: &AppHandle) {
         let _ = w.unminimize();
         let _ = w.set_focus();
     }
+    check_update_soon(app, false);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -545,8 +573,9 @@ pub fn run() {
             }
             // Icona vicino all'orologio con menu
             let open = MenuItem::with_id(app, "open", "Apri Rare Pit Wall", true, None::<&str>)?;
+            let update = MenuItem::with_id(app, "update", "Cerca aggiornamenti", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Esci", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &update, &quit])?;
             let tray = TrayIconBuilder::with_id("main")
                 .icon(Image::from_bytes(TRAY_IDLE)?)
                 .tooltip("Rare Pit Wall · in attesa di iRacing")
@@ -554,6 +583,10 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .on_menu_event(|app, e| match e.id.as_ref() {
                     "open" => show_window(app),
+                    "update" => {
+                        show_window(app);
+                        check_update_soon(app, true);
+                    }
                     "quit" => app.exit(0),
                     _ => {}
                 })
