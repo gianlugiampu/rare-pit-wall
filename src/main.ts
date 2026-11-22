@@ -12,6 +12,34 @@ type Status = {
 };
 type AppState = { paired: boolean; driver: string | null; version: string; status: Status; dashUrl: string | null; dashQr: string | null; liveAuto: boolean };
 
+type Moment = { key: string; kind: string; car: string; carNumber: string; text: string; lap: number; t: number };
+type RaceMoments = { subsession: number; sessionNum: number; track: string; moments: Moment[] };
+const ICON: Record<string, string> = { start: "🚦", overtake: "⬆️", lost: "⬇️", offtrack: "⚠️", incident: "💥", fastlap: "⏱️", fastest: "🟣", battle: "⚔️", lastlap: "🏳️", finish: "🏁" };
+
+async function loadMoments() {
+  const r = await invoke<RaceMoments | null>("get_moments");
+  const list = $("mom-list");
+  if (!r || !r.moments.length) {
+    $("mom-head").textContent = "Nessuna gara ancora: i momenti si segnano da soli durante le gare.";
+    list.innerHTML = "";
+    return;
+  }
+  $("mom-head").textContent = `${r.track} · ${r.moments.length} momenti`;
+  list.innerHTML = "";
+  for (const m of r.moments) {
+    const li = document.createElement("li");
+    const span = document.createElement("span");
+    span.innerHTML = `${ICON[m.kind] ?? "•"} giro ${m.lap} · <b></b> `;
+    (span.querySelector("b") as HTMLElement).textContent = m.car;
+    span.append(m.text);
+    const btn = document.createElement("button");
+    btn.textContent = "Vai";
+    btn.addEventListener("click", () => invoke("jump_to_moment", { sessionNum: r.sessionNum, t: m.t, carNumber: m.carNumber }));
+    li.append(span, btn);
+    list.append(li);
+  }
+}
+
 type EngSettings = { enabled: boolean; voice: string | null; volume: number; fuel: boolean; laptime: boolean; gaps: boolean; flags: boolean; race: boolean };
 type VoiceStatus = { state: string; percent: number; message: string };
 type EngState = { settings: EngSettings; voices: { id: string; name: string }[]; voiceStatus: VoiceStatus };
@@ -134,6 +162,10 @@ window.addEventListener("DOMContentLoaded", async () => {
   $("e-test").addEventListener("click", async () => {
     await saveEng();
     await invoke("test_voice");
+  });
+  // Momenti dell'ultima gara: si caricano quando si apre il riquadro
+  $("mom").addEventListener("toggle", () => {
+    if (($("mom") as HTMLDetailsElement).open) loadMoments();
   });
   // Pit wall: interruttore a mano e accensione automatica nelle gare del calendario
   $<HTMLInputElement>("live-auto").checked = st.liveAuto;

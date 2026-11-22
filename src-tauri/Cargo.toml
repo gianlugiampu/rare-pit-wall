@@ -1,6 +1,6 @@
 [package]
 name = "rare-pit-wall"
-version = "0.6.0"
+version = "0.7.0"
 description = "Rare Pit Wall · programma per Windows del team Rare Project Motorsport"
 authors = ["Rare Project Motorsport"]
 edition = "2024"
@@ -35,7 +35,7 @@ zip = { version = "2", default-features = false, features = ["deflate"] }
 sha2 = "0.10"
 
 [target.'cfg(windows)'.dependencies]
-windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Memory"] }
+windows-sys = { version = "0.59", features = ["Win32_Foundation", "Win32_System_Memory", "Win32_UI_WindowsAndMessaging"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

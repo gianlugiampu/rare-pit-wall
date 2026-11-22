@@ -6,6 +6,7 @@ mod dash;
 mod engineer;
 mod irsdk;
 mod live;
+mod moments;
 mod voice;
 
 use serde::{Deserialize, Serialize};
@@ -103,6 +104,51 @@ struct Shared {
     live_event: Mutex<Option<String>>,
     live_info: Mutex<LiveInfo>,
     radio: Mutex<Vec<String>>,
+    /// P6: numeri cliente iRacing dei piloti del team e momenti dell'ultima gara
+    team_ids: Mutex<Vec<i64>>,
+    last_moments: Mutex<Option<moments::RaceMoments>>,
+}
+
+/// P6 · piloti del team (numeri cliente iRacing), per segnare i momenti di tutte le auto del team
+fn fetch_team(app: &AppHandle, shared: Arc<Shared>) {
+    let Some(token) = load_config(app).token else { return };
+    tauri::async_runtime::spawn(async move {
+        if let Ok(r) = http().get(format!("{SITE}/api/pitwall/me")).bearer_auth(token).send().await {
+            let v: serde_json::Value = r.json().await.unwrap_or_default();
+            let ids: Vec<i64> = v["team"].as_array().cloned().unwrap_or_default().iter().filter_map(|t| t["custId"].as_i64()).collect();
+            if !ids.is_empty() {
+                *shared.team_ids.lock().unwrap() = ids;
+            }
+        }
+    });
+}
+
+fn moments_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().app_local_data_dir().ok().map(|d| d.join("momenti-ultima-gara.json"))
+}
+
+/// P6 · manda i momenti al sito (e li salva sul PC per «Vai al momento»)
+fn send_moments(app: &AppHandle, shared: Arc<Shared>, race: moments::RaceMoments, final_: bool) {
+    if race.moments.is_empty() {
+        return;
+    }
+    if let Some(p) = moments_path(app) {
+        if let Some(dir) = p.parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(p, serde_json::to_string(&race).unwrap_or_default());
+    }
+    *shared.last_moments.lock().unwrap() = Some(race.clone());
+    let Some(token) = load_config(app).token else { return };
+    tauri::async_runtime::spawn(async move {
+        let _ = http()
+            .post(format!("{SITE}/api/pitwall/moments"))
+            .bearer_auth(token)
+            .timeout(Duration::from_secs(30))
+            .json(&serde_json::json!({ "subsession": race.subsession, "sessionNum": race.session_num, "track": race.track, "final": final_, "moments": race.moments }))
+            .send()
+            .await;
+    });
 }
 
 #[derive(Serialize, Clone, Default, PartialEq)]
@@ -228,6 +274,9 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
         // P5: pit wall dal vivo
         let mut tracker = live::Tracker::default();
         let mut live_key = String::new();
+        // P6: momenti salienti della gara
+        let mut detector = moments::Detector::default();
+        let mut moments_sent_at: Option<std::time::Instant> = None;
         loop {
             if sdk.is_none() {
                 sdk = irsdk::Irsdk::open();
@@ -254,11 +303,21 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         cars = (yaml.matches("CarIsPaceCar: 0").count() as i32 - yaml.matches("IsSpectator: 1").count() as i32).max(0);
                         inc_limit = irsdk::yaml_value(&yaml, "IncidentLimit", None).and_then(|v| v.parse().ok());
                         tracker.on_session_info(&yaml);
+                        let team_ids = shared.team_ids.lock().unwrap().clone();
+                        detector.on_session_info(&yaml, &team_ids, tracker.car_idx.max(0) as usize);
                         // nuova sessione: stint da zero e domanda al sito se è una gara del calendario
                         let key = format!("{subsession}-{num}");
                         if key != live_key {
                             live_key = key;
                             tracker.reset();
+                            // P6: gara finita (cambio di sessione): si mandano i momenti; nuova gara: si riparte
+                            if detector.dirty {
+                                send_moments(&app, shared.clone(), detector.race.clone(), true);
+                            }
+                            if session == "Race" {
+                                detector.start_race(subsession.parse().unwrap_or(0), num, &track);
+                            }
+                            fetch_team(&app, shared.clone());
                             *shared.live_event.lock().unwrap() = None;
                             live_probe(&app, shared.clone(), subsession.parse().unwrap_or(0), session.clone());
                         }
@@ -408,6 +467,15 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                             li.text = format!("In diretta · {}", event.clone().unwrap_or_else(|| "acceso a mano".into()));
                         }
                     }
+                    // P6: momenti salienti (solo in gara); con la classifica ufficiale si mandano al sito (al massimo ogni 10 s)
+                    if session == "Race" {
+                        detector.update(s);
+                    }
+                    if official && detector.dirty && moments_sent_at.map(|t| t.elapsed().as_secs() >= 10).unwrap_or(true) {
+                        detector.dirty = false;
+                        moments_sent_at = Some(std::time::Instant::now());
+                        send_moments(&app, shared.clone(), detector.race.clone(), true);
+                    }
                     let radio: Vec<String> = shared.radio.lock().unwrap().drain(..).collect();
                     for r in radio {
                         eng.radio(r);
@@ -420,6 +488,10 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                 // iRacing chiuso: si riapre la memoria al prossimo giro
                 sdk = None;
                 info_rev = -1;
+                if detector.dirty {
+                    detector.dirty = false;
+                    send_moments(&app, shared.clone(), detector.race.clone(), true);
+                }
                 if let Some((key, yaml, num)) = pending.take() {
                     if sent.insert(key) {
                         send_results(&app, shared.clone(), yaml, num, false);
@@ -532,6 +604,21 @@ fn install_serena(app: &AppHandle, shared: &Arc<Shared>) {
             }
         }
     });
+}
+
+/// P6 · momenti dell'ultima gara (dalla memoria o dal file sul PC)
+#[tauri::command]
+fn get_moments(app: AppHandle, shared: tauri::State<Arc<Shared>>) -> Option<moments::RaceMoments> {
+    if let Some(m) = shared.last_moments.lock().unwrap().clone() {
+        return Some(m);
+    }
+    moments_path(&app).and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok())
+}
+
+/// P6 · «Vai al momento» nel replay di iRacing
+#[tauri::command]
+fn jump_to_moment(session_num: i32, t: f64, car_number: String) {
+    moments::jump_to(session_num, t, &car_number);
 }
 
 /// P5 · pit wall acceso/spento a mano (vale fino alla chiusura del programma)
@@ -699,14 +786,14 @@ fn show_window(app: &AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let shared = Arc::new(Shared { status: Mutex::new(Status::default()), tray: Mutex::new(None), result: Mutex::new(None), dash: Default::default(), dash_url: Mutex::new(None), engineer: Default::default(), voices: Default::default(), say: Mutex::new(None), voice_status: Default::default(), live_manual: Mutex::new(false), live_event: Mutex::new(None), live_info: Default::default(), radio: Default::default() });
+    let shared = Arc::new(Shared { status: Mutex::new(Status::default()), tray: Mutex::new(None), result: Mutex::new(None), dash: Default::default(), dash_url: Mutex::new(None), engineer: Default::default(), voices: Default::default(), say: Mutex::new(None), voice_status: Default::default(), live_manual: Mutex::new(false), live_event: Mutex::new(None), live_info: Default::default(), radio: Default::default(), team_ids: Default::default(), last_moments: Mutex::new(None) });
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app)))
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--nascosto"])))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(shared.clone())
-        .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto])
+        .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto, get_moments, jump_to_moment])
         .setup(move |app| {
             // Parte con Windows (si può togliere da Impostazioni → App → Avvio)
             {
