@@ -2,6 +2,7 @@
 //! P1 (base): legge iRacing, mostra lo stato nella finestrella e nell'icona vicino all'orologio,
 //! si abbina all'account del pilota con un codice preso dal Profilo dell'area piloti.
 
+mod dash;
 mod irsdk;
 
 use serde::{Deserialize, Serialize};
@@ -70,6 +71,9 @@ struct Shared {
     status: Mutex<Status>,
     tray: Mutex<Option<TrayIcon>>,
     result: Mutex<Option<String>>,
+    /// P3: dati del cruscotto sul telefono e indirizzo del mini sito sulla rete di casa
+    dash: Arc<Mutex<dash::Dash>>,
+    dash_url: Mutex<Option<String>>,
 }
 
 /// Messaggio nel registro di diagnosi del sito (se il PC è abbinato): così si vede cosa succede senza screenshot
@@ -127,6 +131,8 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
         let mut fuel_at_lap: Option<f32> = None;
         let mut fuel_per_lap: Vec<f32> = Vec::new();
         let mut was_connected = false;
+        let mut cars = 0; // auto in pista (per «P8 / 37» sul cruscotto)
+        let mut tick: u32 = 0;
         // P2: classifica di fine gara
         let mut cur_yaml = String::new();
         let (mut subsession, mut session_num, mut official) = (String::new(), 0, false);
@@ -155,6 +161,7 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         let race = irsdk::race_session(&yaml);
                         session_num = race.map(|r| r.0).unwrap_or(num);
                         official = race.map(|r| r.1).unwrap_or(false);
+                        cars = (yaml.matches("CarIsPaceCar: 0").count() as i32 - yaml.matches("IsSpectator: 1").count() as i32).max(0);
                         cur_yaml = yaml;
                     }
                     // Classifica ufficiale della gara: si manda subito, una volta sola per gara
@@ -206,6 +213,30 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         let avg = fuel_per_lap.iter().sum::<f32>() / fuel_per_lap.len() as f32;
                         st.fuel_laps = Some(st.fuel_l / avg);
                     }
+                    // P3: dati per il cruscotto sul telefono
+                    let f = |s: &mut irsdk::Irsdk, k: &str| s.get(k).map(|v| v.as_f64() as f32).unwrap_or(0.0);
+                    let delta_ok = s.get("LapDeltaToBestLap_OK").map(|v| v.as_bool()).unwrap_or(false);
+                    let positive = |x: f32| if x > 0.0 { Some(x) } else { None };
+                    *shared.dash.lock().unwrap() = dash::Dash {
+                        connected: true,
+                        on_track: st.on_track,
+                        gear: st.gear,
+                        speed_kmh: st.speed_kmh,
+                        rpm: f(s, "RPM"),
+                        sl_first: f(s, "PlayerCarSLFirstRPM"),
+                        sl_shift: f(s, "PlayerCarSLShiftRPM"),
+                        sl_blink: f(s, "PlayerCarSLBlinkRPM"),
+                        delta: if delta_ok { Some(f(s, "LapDeltaToBestLap")) } else { None },
+                        last_lap: positive(f(s, "LapLastLapTime")),
+                        best_lap: positive(f(s, "LapBestLapTime")),
+                        fuel_l: st.fuel_l,
+                        fuel_laps: st.fuel_laps,
+                        position: st.position,
+                        cars,
+                        lap: st.lap,
+                        track: st.track.clone(),
+                        car: st.car.clone(),
+                    };
                 } else {
                     close = true;
                 }
@@ -235,13 +266,20 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                 let token = load_config(&app).token;
                 site_log(token, if st.iracing { format!("collegato a iRacing · {} · {} · {}", st.track, st.car, st.session) } else { "iRacing chiuso".into() });
             }
-            st.result = shared.result.lock().unwrap().clone();
-            let changed = *shared.status.lock().unwrap() != st;
-            if changed {
-                *shared.status.lock().unwrap() = st.clone();
-                let _ = app.emit("status", st);
+            if !st.iracing {
+                *shared.dash.lock().unwrap() = dash::Dash::default();
             }
-            std::thread::sleep(Duration::from_millis(500));
+            // La finestrella si aggiorna due volte al secondo; il cruscotto 20 volte al secondo
+            tick = tick.wrapping_add(1);
+            if tick % 10 == 0 {
+                st.result = shared.result.lock().unwrap().clone();
+                let changed = *shared.status.lock().unwrap() != st;
+                if changed {
+                    *shared.status.lock().unwrap() = st.clone();
+                    let _ = app.emit("status", st);
+                }
+            }
+            std::thread::sleep(Duration::from_millis(50));
         }
     });
 }
@@ -254,12 +292,16 @@ struct AppState {
     driver: Option<String>,
     version: String,
     status: Status,
+    dash_url: Option<String>,
+    dash_qr: Option<String>,
 }
 
 #[tauri::command]
 fn get_state(app: AppHandle, shared: tauri::State<Arc<Shared>>) -> AppState {
     let c = load_config(&app);
-    AppState { paired: c.token.is_some(), driver: c.driver, version: VERSION.into(), status: shared.status.lock().unwrap().clone() }
+    let dash_url = shared.dash_url.lock().unwrap().clone();
+    let dash_qr = dash_url.as_deref().map(dash::qr_svg);
+    AppState { paired: c.token.is_some(), driver: c.driver, version: VERSION.into(), status: shared.status.lock().unwrap().clone(), dash_url, dash_qr }
 }
 
 /// Abbina il PC all'account con il codice di 6 caratteri del Profilo
@@ -345,7 +387,7 @@ fn show_window(app: &AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let shared = Arc::new(Shared { status: Mutex::new(Status::default()), tray: Mutex::new(None), result: Mutex::new(None) });
+    let shared = Arc::new(Shared { status: Mutex::new(Status::default()), tray: Mutex::new(None), result: Mutex::new(None), dash: Default::default(), dash_url: Mutex::new(None) });
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app)))
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--nascosto"])))
@@ -386,6 +428,8 @@ pub fn run() {
                     let _ = w.hide();
                 }
             }
+            // P3: cruscotto sul telefono (mini sito sulla rete di casa)
+            *shared.dash_url.lock().unwrap() = dash::start(shared.dash.clone());
             start_reader(app.handle().clone(), shared.clone());
             start_updater(app.handle().clone(), shared.clone());
             Ok(())

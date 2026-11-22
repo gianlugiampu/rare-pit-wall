@@ -9,7 +9,7 @@ type Status = {
   lap: number; position: number; fuelL: number; fuelLaps: number | null; incidents: number; speedKmh: number; gear: number;
   result: string | null;
 };
-type AppState = { paired: boolean; driver: string | null; version: string; status: Status };
+type AppState = { paired: boolean; driver: string | null; version: string; status: Status; dashUrl: string | null; dashQr: string | null };
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const num = (x: number, d = 1) => x.toFixed(d).replace(".", ",");
@@ -54,6 +54,12 @@ function render(s: Status) {
 window.addEventListener("DOMContentLoaded", async () => {
   const st = await invoke<AppState>("get_state");
   $("ver").textContent = `v${st.version}`;
+  // Cruscotto sul telefono: QR code dell'indirizzo sulla rete di casa (SVG generato dal programma)
+  if (st.dashUrl && st.dashQr) {
+    $("dash").hidden = false;
+    $("qr").innerHTML = st.dashQr;
+    $("dash-url").textContent = st.dashUrl;
+  }
   showPaired(st.paired, st.driver);
   render(st.status);
   listen<Status>("status", (e) => render(e.payload));

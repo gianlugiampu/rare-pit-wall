@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="theme-color" content="#000000">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Rare Pit Wall · Cruscotto</title>
+<style>
+@font-face { font-family: "Good Timing"; src: url("/font.woff2") format("woff2"); font-weight: 700; }
+:root { --main: #9600ff; --p300: #c78cff; --ink: #8a8296; --line: #1f1a26; --pb: #22c55e; --slow: #eab308; --bad: #ff3355; }
+* { box-sizing: border-box; margin: 0; }
+[hidden] { display: none !important; }
+html, body { height: 100%; background: #000; color: #fff; overflow: hidden; -webkit-user-select: none; user-select: none; }
+body { font-family: Montserrat, "Segoe UI", system-ui, sans-serif; display: flex; flex-direction: column; padding: max(10px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 10px max(12px, env(safe-area-inset-left)); }
+.d { font-family: "Good Timing", system-ui, sans-serif; font-variant-numeric: tabular-nums; }
+#lights { display: grid; grid-template-columns: repeat(10, 1fr); gap: 1.2vw; height: 4.5vh; min-height: 14px; }
+#lights i { border-radius: 99px; background: #15111b; transition: background .05s; }
+#lights i.g { background: var(--pb); } #lights i.y { background: var(--slow); } #lights i.r { background: var(--bad); }
+#lights.blink i { animation: bl .12s steps(1) infinite; background: var(--main); }
+@keyframes bl { 50% { background: #15111b; } }
+main { flex: 1; display: grid; grid-template-columns: 1fr 1.25fr 1fr; gap: 2.5vw; align-items: center; margin-top: 2vh; }
+.col { display: flex; flex-direction: column; gap: 1.6vh; }
+.box { border: 1px solid var(--line); border-radius: 10px; padding: 1.2vh 1.6vw; background: #07050a; }
+.box p { font-size: clamp(9px, 1.6vw, 14px); text-transform: uppercase; letter-spacing: .12em; color: var(--ink); font-weight: 700; }
+.box b { display: block; font-size: clamp(18px, 4.6vw, 44px); line-height: 1.15; white-space: nowrap; }
+#delta { font-size: clamp(24px, 6.5vw, 64px); }
+.center { text-align: center; }
+#gear { font-size: clamp(90px, 46vh, 360px); line-height: .9; }
+#speed { font-size: clamp(20px, 5vw, 48px); margin-top: 1vh; }
+#speed small { font-size: .45em; color: var(--ink); }
+.pos small, .lapsleft small { font-size: .5em; color: var(--ink); }
+#best { color: var(--p300); }
+.pb { color: var(--pb); } .slow { color: var(--bad); }
+#wait { position: fixed; inset: 0; background: #000; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; text-align: center; padding: 24px; }
+#wait img { width: 72px; }
+#wait h1 { font-size: 22px; text-transform: uppercase; }
+#wait p { color: var(--ink); font-size: 14px; max-width: 420px; }
+#wait button { margin-top: 8px; background: var(--main); color: #fff; border: 0; border-radius: 10px; padding: 12px 22px; font-weight: 700; font-size: 15px; }
+#rotate { display: none; }
+@media (orientation: portrait) { #rotate { display: block; color: var(--slow); } }
+</style>
+</head>
+<body>
+<div id="lights"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div>
+<main>
+  <div class="col">
+    <div class="box"><p>Delta sul migliore</p><b class="d" id="delta">–</b></div>
+    <div class="box"><p>Ultimo giro</p><b class="d" id="last">–</b></div>
+    <div class="box"><p>Migliore</p><b class="d" id="best">–</b></div>
+  </div>
+  <div class="center">
+    <div class="d" id="gear">N</div>
+    <div class="d" id="speed">0 <small>km/h</small></div>
+  </div>
+  <div class="col">
+    <div class="box"><p>Benzina</p><b class="d" id="fuel">–</b></div>
+    <div class="box lapsleft"><p>Giri di benzina</p><b class="d" id="flaps">–</b></div>
+    <div class="box pos"><p>Posizione</p><b class="d" id="pos">–</b></div>
+  </div>
+</main>
+<div id="wait">
+  <img src="/logo.svg" alt="">
+  <h1 class="d">Rare Pit Wall</h1>
+  <p id="wait-text">Collegamento al PC…</p>
+  <p id="rotate">Gira il telefono in orizzontale.</p>
+  <button id="go" hidden>Avvia il cruscotto</button>
+</div>
+<script>
+const $ = (id) => document.getElementById(id);
+const fmt = (x, d = 1) => x.toFixed(d).replace(".", ",");
+const lap = (s) => {
+  if (s == null || s <= 0) return "–";
+  const m = Math.floor(s / 60), r = s - m * 60;
+  return `${m}:${r.toFixed(3).padStart(6, "0")}`;
+};
+const lights = [...document.querySelectorAll("#lights i")];
+const LCOL = ["g", "g", "g", "g", "y", "y", "y", "r", "r", "r"];
+let started = false, fails = 0;
+
+function render(d) {
+  if (!d.connected) {
+    $("wait").hidden = false;
+    $("wait-text").textContent = "In attesa di iRacing: entra in una sessione sul PC.";
+    $("go").hidden = true;
+    return;
+  }
+  if (!started) {
+    $("wait").hidden = false;
+    $("wait-text").textContent = `${d.track || "iRacing"} · ${d.car || ""}`;
+    $("go").hidden = false;
+    return;
+  }
+  $("wait").hidden = true;
+  $("gear").textContent = d.gear === -1 ? "R" : d.gear === 0 ? "N" : String(d.gear);
+  $("speed").innerHTML = `${d.speedKmh} <small>km/h</small>`;
+  // Luci di cambiata: dalla prima luce al punto di cambiata; oltre il lampeggio tutte insieme
+  const first = d.slFirst, shift = d.slShift || d.slBlink, blink = d.slBlink || d.slShift;
+  const box = $("lights");
+  if (first > 0 && shift > first) {
+    box.style.visibility = "visible";
+    const n = Math.max(0, Math.min(10, Math.ceil(((d.rpm - first) / (shift - first)) * 10)));
+    box.classList.toggle("blink", blink > 0 && d.rpm >= blink);
+    lights.forEach((l, i) => (l.className = i < n ? LCOL[i] : ""));
+  } else box.style.visibility = "hidden";
+  const de = $("delta");
+  if (d.delta == null) { de.textContent = "–"; de.className = "d"; }
+  else { de.textContent = `${d.delta <= 0 ? "−" : "+"}${fmt(Math.abs(d.delta), 3)}`; de.className = `d ${d.delta <= 0 ? "pb" : "slow"}`; }
+  $("last").textContent = lap(d.lastLap);
+  $("best").textContent = lap(d.bestLap);
+  $("fuel").textContent = `${fmt(d.fuelL)} L`;
+  $("flaps").textContent = d.fuelLaps != null ? fmt(d.fuelLaps) : "–";
+  $("pos").innerHTML = d.position > 0 ? `P${d.position}${d.cars > 0 ? ` <small>/ ${d.cars}</small>` : ""}` : "–";
+}
+
+async function poll() {
+  try {
+    const r = await fetch("/dati", { cache: "no-store" });
+    render(await r.json());
+    fails = 0;
+  } catch {
+    if (++fails > 10) { $("wait").hidden = false; $("wait-text").textContent = "PC non raggiungibile: telefono e PC devono essere sulla stessa Wi-Fi."; $("go").hidden = true; }
+  }
+  setTimeout(poll, 66);
+}
+
+// Avvio con un tocco: schermo intero e schermo sempre acceso (dove il telefono lo permette)
+$("go").addEventListener("click", async () => {
+  started = true;
+  try { await document.documentElement.requestFullscreen?.(); } catch {}
+  try { await screen.orientation?.lock?.("landscape"); } catch {}
+  try { await navigator.wakeLock?.request("screen"); } catch {}
+});
+poll();
+</script>
+</body>
+</html>
