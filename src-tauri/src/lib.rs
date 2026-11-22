@@ -151,20 +151,23 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         let num = s.get("SessionNum").map(|v| v.as_i32()).unwrap_or(0);
                         session = irsdk::yaml_value(&yaml, "SessionType", Some(&format!("SessionNum: {num}\n"))).unwrap_or_default();
                         subsession = irsdk::yaml_value(&yaml, "SubSessionID", None).unwrap_or_default();
-                        official = irsdk::yaml_value(&yaml, "ResultsOfficial", Some(&format!("SessionNum: {num}\n"))).as_deref() == Some("1");
-                        session_num = num;
+                        // la gara del weekend (anche se si sta guardando un'altra sessione, es. nel replay)
+                        let race = irsdk::race_session(&yaml);
+                        session_num = race.map(|r| r.0).unwrap_or(num);
+                        official = race.map(|r| r.1).unwrap_or(false);
                         cur_yaml = yaml;
                     }
-                    // Gara finita: si manda la classifica appena iRacing la rende ufficiale (una volta sola per gara)
+                    // Classifica ufficiale della gara: si manda subito, una volta sola per gara
+                    let key = format!("{subsession}-{session_num}");
+                    if official && !sent.contains(&key) {
+                        send_results(&app, shared.clone(), cur_yaml.clone(), session_num, true);
+                        sent.insert(key.clone());
+                        pending = None;
+                    }
                     if session == "Race" {
-                        let key = format!("{subsession}-{session_num}");
                         let state = s.get("SessionState").map(|v| v.as_i32()).unwrap_or(0);
                         if !sent.contains(&key) {
-                            if official {
-                                send_results(&app, shared.clone(), cur_yaml.clone(), session_num, true);
-                                sent.insert(key);
-                                pending = None;
-                            } else if state >= 5 && pending.as_ref().map(|p| p.1.len()) != Some(cur_yaml.len()) {
+                            if state >= 5 && pending.as_ref().map(|p| p.1.len()) != Some(cur_yaml.len()) {
                                 // bandiera a scacchi: tengo da parte la classifica nel caso iRacing venga chiuso prima
                                 pending = Some((key, cur_yaml.clone(), session_num));
                             }

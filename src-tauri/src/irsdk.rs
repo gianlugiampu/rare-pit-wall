@@ -196,6 +196,25 @@ impl Drop for Irsdk {
     }
 }
 
+/// Ultima gara (SessionType: Race) nelle informazioni di sessione: numero della sessione e se la classifica è ufficiale.
+/// Nei replay e a fine gara la classifica c'è già, qualunque sia la sessione che si sta guardando.
+pub fn race_session(yaml: &str) -> Option<(i32, bool)> {
+    let key = "SessionNum: ";
+    let starts: Vec<usize> = yaml.match_indices(key).map(|(i, _)| i).collect();
+    let mut found = None;
+    for (k, &i) in starts.iter().enumerate() {
+        let end = starts.get(k + 1).copied().unwrap_or(yaml.len());
+        let block = &yaml[i..end];
+        let num = block[key.len()..].lines().next().and_then(|l| l.trim().parse::<i32>().ok());
+        if let Some(num) = num {
+            if block.contains("SessionType: Race") {
+                found = Some((num, block.contains("ResultsOfficial: 1")));
+            }
+        }
+    }
+    found
+}
+
 /// Primo valore di una chiave nel YAML della sessione (es. "TrackDisplayName"), dopo un punto di partenza opzionale
 pub fn yaml_value(yaml: &str, key: &str, after: Option<&str>) -> Option<String> {
     let start = after.and_then(|a| yaml.find(a)).unwrap_or(0);
@@ -203,4 +222,17 @@ pub fn yaml_value(yaml: &str, key: &str, after: Option<&str>) -> Option<String> 
     let i = yaml[start..].find(&needle)? + start + needle.len();
     let line = yaml[i..].lines().next()?.trim();
     Some(line.trim_matches('"').to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn trova_la_gara() {
+        let y = "SessionInfo:\n Sessions:\n - SessionNum: 0\n   SessionType: Practice\n   ResultsOfficial: 1\n - SessionNum: 1\n   SessionType: Lone Qualify\n - SessionNum: 2\n   SessionType: Race\n   ResultsPositions:\n   - Position: 1\n   ResultsOfficial: 1\nDriverInfo:\n DriverCarIdx: 3\n";
+        assert_eq!(race_session(y), Some((2, true)));
+        let y2 = y.replace("   ResultsOfficial: 1\nDriverInfo", "   ResultsOfficial: 0\nDriverInfo");
+        assert_eq!(race_session(&y2), Some((2, false)));
+        assert_eq!(race_session("SessionInfo:\n Sessions:\n - SessionNum: 0\n   SessionType: Practice\n"), None);
+    }
 }
