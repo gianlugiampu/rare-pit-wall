@@ -6,7 +6,9 @@
 //! Parla in gara e in qualifica; in qualifica, prova e test dice il tempo del giro e il delta a ogni giro. Quantità «media»: tempi e distacchi ogni 3 giri.
 
 use serde::{Deserialize, Serialize};
+use crate::voice;
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 #[derive(Serialize, Deserialize, Clone, PartialEq)]
@@ -67,6 +69,37 @@ const BLACK: u32 = 0x10000;
 const FURLED: u32 = 0x80000;
 const REPAIR: u32 = 0x100000;
 
+/// Uscita della voce: Serena (Piper) se scaricata e scelta, altrimenti la voce di Windows
+struct Output {
+    tts: Option<tts::Tts>,
+    piper: Option<voice::Piper>,
+    dir: PathBuf,
+    serena: bool,
+    volume: f32,
+}
+
+impl Output {
+    fn is_speaking(&self) -> bool {
+        if self.serena {
+            self.piper.as_ref().map(|p| p.is_speaking()).unwrap_or(false)
+        } else {
+            self.tts.as_ref().and_then(|t| t.is_speaking().ok()).unwrap_or(false)
+        }
+    }
+    fn speak(&mut self, text: &str, interrupt: bool) -> bool {
+        if self.serena {
+            if let Some(p) = self.piper.as_ref() {
+                p.speak(text, self.volume);
+                return true;
+            }
+        }
+        match self.tts.as_mut() {
+            Some(t) => t.speak(text, interrupt).is_ok(),
+            None => false,
+        }
+    }
+}
+
 struct Msg {
     text: String,
     important: bool,
@@ -74,7 +107,7 @@ struct Msg {
 }
 
 pub struct Engineer {
-    tts: Option<tts::Tts>,
+    out: Output,
     applied: Option<Settings>,
     queue: VecDeque<Msg>,
     last_end: Instant,
@@ -101,13 +134,15 @@ pub struct Engineer {
 }
 
 impl Engineer {
-    pub fn new() -> Engineer {
-        Engineer::new_with(tts::Tts::default().ok(), None)
+    /// `dir`: cartella dove si scarica la voce Serena
+    pub fn new(dir: PathBuf) -> Engineer {
+        Engineer::new_with(Output { tts: tts::Tts::default().ok(), piper: None, dir, serena: false, volume: 0.8 }, None)
     }
 
     /// Voci italiane per prime (le altre servono poco)
     pub fn voices(&self) -> Vec<VoiceInfo> {
         let mut v: Vec<(bool, VoiceInfo)> = self
+            .out
             .tts
             .as_ref()
             .and_then(|t| t.voices().ok())
@@ -116,15 +151,24 @@ impl Engineer {
             .map(|v| (v.language().as_str().starts_with("it"), VoiceInfo { id: v.id(), name: v.name() }))
             .collect();
         v.sort_by_key(|(it, _)| !*it);
-        v.into_iter().map(|(_, v)| v).collect()
+        let mut list = vec![VoiceInfo { id: voice::SERENA.into(), name: "Serena (naturale, consigliata)".into() }];
+        list.extend(v.into_iter().map(|(_, v)| v));
+        list
     }
 
     /// Applica voce e volume quando cambiano le impostazioni
     pub fn apply(&mut self, s: &Settings) {
+        // Serena: scelta (o voce predefinita) e scaricata → si accende Piper
+        let wants = matches!(s.voice.as_deref(), None | Some(voice::SERENA));
+        if wants && self.out.piper.is_none() && voice::installed(&self.out.dir) {
+            self.out.piper = voice::Piper::start(&self.out.dir);
+        }
+        self.out.serena = wants && self.out.piper.is_some();
+        self.out.volume = s.volume.min(100) as f32 / 100.0;
         if self.applied.as_ref() == Some(s) {
             return;
         }
-        if let Some(t) = self.tts.as_mut() {
+        if let Some(t) = self.out.tts.as_mut() {
             let voices = t.voices().unwrap_or_default();
             let chosen = s
                 .voice
@@ -143,8 +187,7 @@ impl Engineer {
 
     /// Dice subito una frase (prova della voce dalla finestrella)
     pub fn say_now(&mut self, text: &str) {
-        if let Some(t) = self.tts.as_mut() {
-            let _ = t.speak(text, true);
+        if self.out.speak(text, true) {
             self.speaking_since = Some(Instant::now());
         }
     }
@@ -158,24 +201,17 @@ impl Engineer {
     }
 
     fn reset(&mut self, session: &str) {
-        let tts = self.tts.take();
+        let out = std::mem::replace(&mut self.out, Output { tts: None, piper: None, dir: PathBuf::new(), serena: false, volume: 0.8 });
         let applied = self.applied.take();
-        *self = Engineer::new_with(tts, applied);
+        *self = Engineer::new_with(out, applied);
         self.session = session.to_string();
     }
 
-    fn new_with(tts: Option<tts::Tts>, applied: Option<Settings>) -> Engineer {
-        let mut e = Engineer::empty();
-        e.tts = tts;
-        e.applied = applied;
-        e
-    }
-
-    fn empty() -> Engineer {
+    fn new_with(out: Output, applied: Option<Settings>) -> Engineer {
         let now = Instant::now();
         Engineer {
-            tts: None,
-            applied: None,
+            out,
+            applied,
             queue: VecDeque::new(),
             last_end: now,
             speaking_since: None,
@@ -387,8 +423,7 @@ impl Engineer {
     fn speak_if_possible(&mut self, t: &Tele) {
         // via i messaggi vecchi (gli avvisi importanti restano di più)
         self.queue.retain(|m| m.at.elapsed() < Duration::from_secs(if m.important { 90 } else { 20 }));
-        let Some(tts) = self.tts.as_mut() else { return };
-        let busy = tts.is_speaking().unwrap_or(false);
+        let busy = self.out.is_speaking();
         if busy {
             self.last_end = Instant::now();
             return;
@@ -408,7 +443,7 @@ impl Engineer {
             return;
         }
         if let Some(m) = self.queue.pop_front() {
-            let _ = tts.speak(m.text, false);
+            self.out.speak(&m.text, false);
             self.speaking_since = Some(Instant::now());
             self.last_end = Instant::now();
         }

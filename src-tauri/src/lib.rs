@@ -5,6 +5,7 @@
 mod dash;
 mod engineer;
 mod irsdk;
+mod voice;
 
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -90,6 +91,7 @@ struct Shared {
     engineer: Mutex<engineer::Settings>,
     voices: Mutex<Vec<engineer::VoiceInfo>>,
     say: Mutex<Option<String>>,
+    voice_status: Arc<Mutex<voice::VoiceStatus>>,
 }
 
 /// Messaggio nel registro di diagnosi del sito (se il PC è abbinato): così si vede cosa succede senza screenshot
@@ -155,7 +157,7 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
         let mut sent: std::collections::HashSet<String> = Default::default();
         let mut pending: Option<(String, String, i32)> = None; // gara finita ma classifica non ancora ufficiale
         // P4: ingegnere a voce (la voce di Windows vive in questo thread)
-        let mut eng = engineer::Engineer::new();
+        let mut eng = engineer::Engineer::new(voice_dir(&app));
         *shared.voices.lock().unwrap() = eng.voices();
         let mut inc_limit: Option<i32> = None;
         loop {
@@ -375,22 +377,65 @@ fn get_state(app: AppHandle, shared: tauri::State<Arc<Shared>>) -> AppState {
 
 // ——— P4: ingegnere a voce ———
 #[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
 struct EngineerState {
     settings: engineer::Settings,
     voices: Vec<engineer::VoiceInfo>,
+    voice_status: voice::VoiceStatus,
 }
 
 #[tauri::command]
 fn get_engineer(shared: tauri::State<Arc<Shared>>) -> EngineerState {
-    EngineerState { settings: shared.engineer.lock().unwrap().clone(), voices: shared.voices.lock().unwrap().clone() }
+    EngineerState {
+        settings: shared.engineer.lock().unwrap().clone(),
+        voices: shared.voices.lock().unwrap().clone(),
+        voice_status: shared.voice_status.lock().unwrap().clone(),
+    }
+}
+
+/// Cartella dove si scarica la voce Serena (dati del programma, non serve ripeterlo agli aggiornamenti)
+fn voice_dir(app: &AppHandle) -> std::path::PathBuf {
+    app.path().app_local_data_dir().unwrap_or_else(|_| std::env::temp_dir()).join("voce")
+}
+
+/// Scarica la voce Serena in sottofondo (una volta sola); intanto parla la voce di Windows
+fn install_serena(app: &AppHandle, shared: &Arc<Shared>) {
+    let dir = voice_dir(app);
+    if voice::installed(&dir) {
+        *shared.voice_status.lock().unwrap() = voice::VoiceStatus { state: "pronta".into(), percent: 100, message: "Voce Serena pronta".into() };
+        return;
+    }
+    if shared.voice_status.lock().unwrap().state == "scarico" {
+        return;
+    }
+    let status = shared.voice_status.clone();
+    let token = load_config(app).token;
+    tauri::async_runtime::spawn(async move {
+        match voice::install(dir, status.clone()).await {
+            Ok(()) => site_log(token, "voce Serena scaricata".into()),
+            Err(e) => {
+                site_log(token, format!("voce Serena non scaricata: {e}"));
+                *status.lock().unwrap() = voice::VoiceStatus { state: "errore".into(), percent: 0, message: format!("Voce Serena non scaricata ({e}). Riprova più tardi.") };
+            }
+        }
+    });
+}
+
+#[tauri::command]
+fn install_voice(app: AppHandle, shared: tauri::State<Arc<Shared>>) {
+    install_serena(&app, shared.inner());
 }
 
 #[tauri::command]
 fn set_engineer(app: AppHandle, shared: tauri::State<Arc<Shared>>, settings: engineer::Settings) {
     *shared.engineer.lock().unwrap() = settings.clone();
     let mut c = load_config(&app);
+    let wants_serena = settings.enabled && matches!(settings.voice.as_deref(), None | Some(voice::SERENA));
     c.engineer = settings;
     save_config(&app, &c);
+    if wants_serena {
+        install_serena(&app, shared.inner());
+    }
 }
 
 #[tauri::command]
@@ -484,14 +529,14 @@ fn show_window(app: &AppHandle) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let shared = Arc::new(Shared { status: Mutex::new(Status::default()), tray: Mutex::new(None), result: Mutex::new(None), dash: Default::default(), dash_url: Mutex::new(None), engineer: Default::default(), voices: Default::default(), say: Mutex::new(None) });
+    let shared = Arc::new(Shared { status: Mutex::new(Status::default()), tray: Mutex::new(None), result: Mutex::new(None), dash: Default::default(), dash_url: Mutex::new(None), engineer: Default::default(), voices: Default::default(), say: Mutex::new(None), voice_status: Default::default() });
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| show_window(app)))
         .plugin(tauri_plugin_autostart::init(tauri_plugin_autostart::MacosLauncher::LaunchAgent, Some(vec!["--nascosto"])))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(shared.clone())
-        .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice])
+        .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice])
         .setup(move |app| {
             // Parte con Windows (si può togliere da Impostazioni → App → Avvio)
             {
@@ -526,7 +571,14 @@ pub fn run() {
                 }
             }
             // P4: impostazioni dell'ingegnere salvate sul PC
-            *shared.engineer.lock().unwrap() = load_config(app.handle()).engineer;
+            let eng_settings = load_config(app.handle()).engineer;
+            // voce Serena: si scarica da sola la prima volta (se l'ingegnere è acceso e Serena è la voce scelta)
+            if eng_settings.enabled && matches!(eng_settings.voice.as_deref(), None | Some(voice::SERENA)) {
+                install_serena(app.handle(), &shared);
+            } else if voice::installed(&voice_dir(app.handle())) {
+                *shared.voice_status.lock().unwrap() = voice::VoiceStatus { state: "pronta".into(), percent: 100, message: "Voce Serena pronta".into() };
+            }
+            *shared.engineer.lock().unwrap() = eng_settings;
             // P3: cruscotto sul telefono (mini sito sulla rete di casa)
             *shared.dash_url.lock().unwrap() = dash::start(shared.dash.clone());
             start_reader(app.handle().clone(), shared.clone());

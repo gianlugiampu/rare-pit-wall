@@ -12,7 +12,8 @@ type Status = {
 type AppState = { paired: boolean; driver: string | null; version: string; status: Status; dashUrl: string | null; dashQr: string | null };
 
 type EngSettings = { enabled: boolean; voice: string | null; volume: number; fuel: boolean; laptime: boolean; gaps: boolean; flags: boolean; race: boolean };
-type EngState = { settings: EngSettings; voices: { id: string; name: string }[] };
+type VoiceStatus = { state: string; percent: number; message: string };
+type EngState = { settings: EngSettings; voices: { id: string; name: string }[]; voiceStatus: VoiceStatus };
 const FLAGS = ["enabled", "laptime", "fuel", "gaps", "flags", "race"] as const;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
@@ -100,7 +101,16 @@ window.addEventListener("DOMContentLoaded", async () => {
   const eng = await invoke<EngState>("get_engineer");
   const sel = $<HTMLSelectElement>("e-voice");
   sel.innerHTML = eng.voices.map((v) => `<option value="${v.id}">${v.name.replace(/^Microsoft /, "")}</option>`).join("") || "<option>Nessuna voce trovata</option>";
-  if (eng.settings.voice) sel.value = eng.settings.voice;
+  sel.value = eng.settings.voice ?? "serena";
+  // Stato della voce Serena (si scarica da sola la prima volta)
+  const showVoice = (v: VoiceStatus) => {
+    const wantsSerena = sel.value === "serena";
+    $("v-status").textContent = !wantsSerena ? "" : v.state === "scarico" ? `${v.message} ${v.percent}%` : v.state === "pronta" ? "✓ Voce Serena pronta" : v.state === "errore" ? v.message : "La voce Serena non è ancora scaricata: intanto parla la voce di Windows.";
+    $("v-install").hidden = !wantsSerena || v.state === "scarico" || v.state === "pronta";
+  };
+  showVoice(eng.voiceStatus);
+  setInterval(async () => showVoice((await invoke<EngState>("get_engineer")).voiceStatus), 1000);
+  $("v-install").addEventListener("click", () => invoke("install_voice"));
   $<HTMLInputElement>("e-volume").value = String(eng.settings.volume);
   for (const k of FLAGS) $<HTMLInputElement>(`e-${k}`).checked = eng.settings[k];
   const saveEng = () => {

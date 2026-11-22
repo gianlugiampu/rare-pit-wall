@@ -30,3 +30,9 @@ Se si perde, i programmi già installati non accettano più gli aggiornamenti: a
 
 ## Costruire sul PC (sviluppo)
 Serve Rust (toolchain MSVC) con Visual Studio Build Tools (C++), poi `npm install` e `npx tauri dev`.
+
+## Crediti
+- Voce dell'ingegnere «Serena»: [Piper](https://github.com/rhasspy/piper) (MIT) con la voce it_IT-serena-high,
+  addestrata sul dataset [committa/serena-synthetic-it-27h](https://huggingface.co/datasets/committa/serena-synthetic-it-27h) (CC-BY 4.0).
+  Piper e la voce si scaricano la prima volta dal programma (non sono in questo repository); `src-tauri/voices/serena.onnx.json`
+  è la configurazione della voce senza 5 dittonghi inglesi che la versione 2023 di Piper non accetta.

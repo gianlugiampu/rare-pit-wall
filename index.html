@@ -63,6 +63,8 @@
         <summary>Ingegnere a voce</summary>
         <label class="row"><input type="checkbox" id="e-enabled" /> Attivo</label>
         <label class="field">Voce <select id="e-voice"></select></label>
+        <p id="v-status" class="small"></p>
+        <button type="button" id="v-install" class="ghost" hidden>Scarica la voce Serena</button>
         <label class="field">Volume <input type="range" id="e-volume" min="0" max="100" step="5" /></label>
         <p class="small">Cosa dire (in gara; in prova e qualifica solo tempo e delta):</p>
         <label class="row"><input type="checkbox" id="e-laptime" /> Tempo del giro e delta</label>
@@ -71,6 +73,7 @@
         <label class="row"><input type="checkbox" id="e-flags" /> Bandiere</label>
         <label class="row"><input type="checkbox" id="e-race" /> Info gara (posizioni, giri alla fine, incidenti)</label>
         <button type="button" id="e-test" class="ghost">Prova la voce</button>
+        <p class="small">Voce Serena: Piper (MIT) e dataset «serena-synthetic-it» (CC-BY 4.0).</p>
         <p class="small">Non parla con auto affiancate e solo in rettilineo, per non sovrapporsi allo spotter di iRacing.</p>
       </details>
       <footer>
