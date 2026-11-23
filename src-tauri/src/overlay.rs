@@ -25,6 +25,8 @@ pub struct Kind {
 }
 
 pub const KINDS: &[Kind] = &[
+    Kind { id: "relative", name: "Relative", size: (330.0, 180.0), pos: (0.16, 0.08) },
+    Kind { id: "classifica", name: "Classifica", size: (470.0, 260.0), pos: (0.84, 0.08) },
     Kind { id: "delta", name: "Delta", size: (350.0, 74.0), pos: (0.5, 0.05) },
     Kind { id: "sessione", name: "Sessione", size: (350.0, 26.0), pos: (0.5, 0.14) },
     Kind { id: "benzina", name: "Benzina", size: (190.0, 130.0), pos: (0.88, 0.66) },
@@ -308,6 +310,145 @@ struct Slow {
     air_temp: Option<f32>,
     flags: u32,
     sectors: Vec<f32>,
+    /// P8.3: stato della sessione (4 = gara in corso), giri totali, la tua auto, versione dell'elenco piloti
+    session_state: i32,
+    laps_total: Option<i32>,
+    me: i32,
+    drivers_rev: i32,
+}
+
+/// P8.3 · un'auto in pista (10 volte al secondo, solo con Relative o Classifica aperti)
+#[derive(Serialize, Default)]
+struct Car {
+    i: usize,
+    pos: i32,
+    cpos: i32,
+    lap: i32,
+    lapc: i32,
+    pct: f32,
+    est: f32,
+    f2: f32,
+    last: f32,
+    best: f32,
+    pit: bool,
+    /// -1 = non in pista (garage, disconnesso)
+    surf: i32,
+}
+
+/// P8.3 · pilota dall'elenco della sessione
+#[derive(Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Driver {
+    idx: usize,
+    name: String,
+    full: String,
+    number: String,
+    class_id: i32,
+    class_name: String,
+    class_color: String,
+    class_lap: f32,
+    lic: String,
+    sr: String,
+    irating: i32,
+    team: String,
+    flair: String,
+    rare: bool,
+}
+
+#[derive(Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct Drivers {
+    rev: i32,
+    list: Vec<Driver>,
+    /// griglia di partenza: auto -> (posizione, posizione di classe), da 1
+    start: BTreeMap<usize, (i32, i32)>,
+}
+
+static DRIVERS: LazyLock<Mutex<Drivers>> = LazyLock::new(Default::default);
+static TEAM: Mutex<Vec<i64>> = Mutex::new(Vec::new());
+
+/// Numeri cliente iRacing dei piloti Rare (dal sito): i compagni di squadra si colorano di viola
+pub fn set_team(ids: Vec<i64>) {
+    *TEAM.lock().unwrap() = ids;
+}
+
+/// Voci «- Chiave: …» di una sezione del YAML (DriverInfo -> Drivers, QualifyResultsInfo -> Results)
+fn entries<'a>(yaml: &'a str, section: &str, first_key: &str) -> Vec<BTreeMap<&'a str, &'a str>> {
+    // la chiave seguita da «a capo» (così «Drivers:» non trova «MaxDrivers: 1»)
+    let Some(i) = yaml.find(&format!("{section}
+")) else { return vec![] };
+    let start_indent = yaml[..i].rsplit('\n').next().map(|l| l.len()).unwrap_or(0);
+    let mut out = vec![];
+    let marker = format!("- {first_key}: ");
+    for line in yaml[i + section.len()..].lines().skip(1) {
+        let indent = line.len() - line.trim_start().len();
+        if !line.trim().is_empty() && indent <= start_indent && !line.trim_start().starts_with('-') {
+            break; // sezione successiva
+        }
+        let t = line.trim();
+        let t = if let Some(rest) = t.strip_prefix("- ") {
+            if t.starts_with(&marker) {
+                out.push(BTreeMap::new());
+            }
+            rest
+        } else {
+            t
+        };
+        if let (Some(m), Some((k, v))) = (out.last_mut(), t.split_once(": ")) {
+            m.insert(k, v.trim().trim_matches('"'));
+        }
+    }
+    out
+}
+
+/// «Gianluca Giampuzzo» -> «G. Giampuzzo»
+fn short_name(full: &str) -> String {
+    let parts: Vec<&str> = full.split_whitespace().collect();
+    match parts.as_slice() {
+        [] => String::new(),
+        [one] => one.to_string(),
+        [first, rest @ ..] => format!("{}. {}", first.chars().next().unwrap_or(' '), rest.join(" ")),
+    }
+}
+
+fn parse_drivers(yaml: &str, rev: i32) -> Drivers {
+    let team = TEAM.lock().unwrap().clone();
+    let mut list = vec![];
+    for d in entries(yaml, "Drivers:", "CarIdx") {
+        let g = |k: &str| d.get(k).copied().unwrap_or("");
+        if g("CarIsPaceCar") == "1" || g("IsSpectator") == "1" {
+            continue;
+        }
+        let Ok(idx) = g("CarIdx").parse::<usize>() else { continue };
+        let full = g("UserName").to_string();
+        let (lic, sr) = g("LicString").split_once(' ').map(|(l, s)| (l.to_string(), s.to_string())).unwrap_or_default();
+        let color = g("CarClassColor").trim_start_matches("0x");
+        let cust: i64 = g("UserID").parse().unwrap_or(-1);
+        list.push(Driver {
+            idx,
+            name: short_name(&full),
+            full,
+            number: g("CarNumber").to_string(),
+            class_id: g("CarClassID").parse().unwrap_or(0),
+            class_name: g("CarClassShortName").to_string(),
+            class_color: if color.len() == 6 { format!("#{color}") } else { String::new() },
+            class_lap: g("CarClassEstLapTime").parse().unwrap_or(0.0),
+            lic,
+            sr: sr.chars().take(3).collect(),
+            irating: g("IRating").parse().unwrap_or(0),
+            team: g("TeamName").to_string(),
+            flair: g("FlairName").to_string(),
+            rare: cust > 0 && team.contains(&cust),
+        });
+    }
+    let mut start = BTreeMap::new();
+    for r in entries(yaml, "QualifyResultsInfo:", "Position") {
+        let p = |k: &str| r.get(k).and_then(|v| v.parse::<i32>().ok());
+        if let (Some(pos), Some(cpos), Some(idx)) = (p("Position"), p("ClassPosition"), p("CarIdx")) {
+            start.insert(idx as usize, (pos + 1, cpos + 1));
+        }
+    }
+    Drivers { rev, list, start }
 }
 
 #[derive(Serialize)]
@@ -315,6 +456,8 @@ struct Frame<'a> {
     fast: &'a Fast,
     #[serde(skip_serializing_if = "Option::is_none")]
     slow: Option<&'a Slow>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    cars: Option<&'a Vec<Car>>,
 }
 
 /// Inizi dei settori della pista (SplitTimeInfo → SectorStartPct)
@@ -376,6 +519,8 @@ fn start_reader(app: AppHandle) {
                         let pct = irsdk::yaml_value(&yaml, "DriverCarMaxFuelPct", None).and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0);
                         slow.fuel_max = max.map(|m| m * pct).filter(|m| *m > 0.0);
                         slow.sectors = sectors(&yaml);
+                        slow.drivers_rev = info_rev;
+                        *DRIVERS.lock().unwrap() = parse_drivers(&yaml, info_rev);
                         if num != session_num {
                             session_num = num;
                             per_lap.clear();
@@ -404,6 +549,9 @@ fn start_reader(app: AppHandle) {
                         slow.track_temp = s.get("TrackTempCrew").or_else(|| s.get("TrackTemp")).map(|v| v.as_f64() as f32);
                         slow.air_temp = s.get("AirTemp").map(|v| v.as_f64() as f32);
                         slow.flags = s.get("SessionFlags").map(|v| v.as_i32() as u32).unwrap_or(0);
+                        slow.session_state = s.get("SessionState").map(|v| v.as_i32()).unwrap_or(0);
+                        slow.laps_total = s.get("SessionLapsTotal").map(|v| v.as_i32()).filter(|v| *v > 0 && *v < 32000);
+                        slow.me = s.get("PlayerCarIdx").map(|v| v.as_i32()).unwrap_or(-1);
                         // consumo: ultimo giro e media degli ultimi 5
                         if slow.lap != last_lap_n {
                             if let Some(prev) = fuel_at_lap {
@@ -437,8 +585,31 @@ fn start_reader(app: AppHandle) {
                 sync(&app);
             }
             let open = KINDS.iter().any(|k| app.get_webview_window(&label(k.id)).is_some());
+            let need_cars = tick % 6 == 0 && ["relative", "classifica"].iter().any(|id| app.get_webview_window(&label(id)).is_some());
+            let mut cars: Vec<Car> = vec![];
+            if let (true, Some(s)) = (need_cars && fast.connected, sdk.as_mut()) {
+                let gi = |s: &mut irsdk::Irsdk, k: &str, i: usize| s.get_at(k, i).map(|v| v.as_i32()).unwrap_or(0);
+                let gf = |s: &mut irsdk::Irsdk, k: &str, i: usize| s.get_at(k, i).map(|v| v.as_f64() as f32).unwrap_or(0.0);
+                let idxs: Vec<usize> = DRIVERS.lock().unwrap().list.iter().map(|d| d.idx).collect();
+                for i in idxs {
+                    cars.push(Car {
+                        i,
+                        pos: gi(s, "CarIdxPosition", i),
+                        cpos: gi(s, "CarIdxClassPosition", i),
+                        lap: gi(s, "CarIdxLap", i),
+                        lapc: gi(s, "CarIdxLapCompleted", i),
+                        pct: gf(s, "CarIdxLapDistPct", i),
+                        est: gf(s, "CarIdxEstTime", i),
+                        f2: gf(s, "CarIdxF2Time", i),
+                        last: gf(s, "CarIdxLastLapTime", i),
+                        best: gf(s, "CarIdxBestLapTime", i),
+                        pit: s.get_at("CarIdxOnPitRoad", i).map(|v| v.as_bool()).unwrap_or(false),
+                        surf: gi(s, "CarIdxTrackSurface", i),
+                    });
+                }
+            }
             if open {
-                let frame = Frame { fast: &fast, slow: (tick % 15 == 0).then_some(&slow) };
+                let frame = Frame { fast: &fast, slow: (tick % 15 == 0).then_some(&slow), cars: need_cars.then_some(&cars) };
                 let _ = app.emit_filter("ov-data", &frame, is_overlay_target);
             }
             tick = tick.wrapping_add(1);
@@ -571,6 +742,12 @@ pub async fn overlay_open_settings(app: AppHandle) {
     open_settings(&app);
 }
 
+/// P8.3 · elenco dei piloti della sessione (la pagina lo richiede quando cambia la versione)
+#[tauri::command]
+pub fn overlay_drivers() -> Drivers {
+    DRIVERS.lock().unwrap().clone()
+}
+
 /// La pagina di un overlay chiede chi è e come deve apparire
 #[tauri::command]
 pub fn overlay_hello(window: WebviewWindow) -> serde_json::Value {
@@ -588,5 +765,15 @@ mod tests {
         let y = "WeekendInfo:\n TrackName: x\nSplitTimeInfo:\n Sectors:\n - SectorNum: 0\n   SectorStartPct: 0.000000\n - SectorNum: 1\n   SectorStartPct: 0.345000\n - SectorNum: 2\n   SectorStartPct: 0.700000\nCarSetup:\n Foo: 1\n";
         assert_eq!(sectors(y), vec![0.0, 0.345, 0.7]);
         assert!(sectors("DriverInfo:\n").is_empty());
+    }
+    #[test]
+    fn piloti() {
+        let y = "DriverInfo:\n DriverCarIdx: 1\n Drivers:\n - CarIdx: 0\n   UserName: Pace Car\n   CarIsPaceCar: 1\n - CarIdx: 1\n   UserName: Gianluca Giampuzzo\n   UserID: 123\n   CarNumber: \"28\"\n   CarClassID: 4\n   CarClassShortName: F4\n   CarClassColor: 0xffda59\n   LicString: C 2.31\n   IRating: 1612\n   CarIsPaceCar: 0\n   IsSpectator: 0\nSplitTimeInfo:\n Sectors:\n - SectorNum: 0\nQualifyResultsInfo:\n Results:\n - Position: 0\n   ClassPosition: 0\n   CarIdx: 1\n   FastestTime: 90.1\n";
+        set_team(vec![123]);
+        let d = parse_drivers(y, 7);
+        assert_eq!(d.list.len(), 1);
+        let g = &d.list[0];
+        assert_eq!((g.name.as_str(), g.number.as_str(), g.class_color.as_str(), g.lic.as_str(), g.sr.as_str(), g.irating, g.rare), ("G. Giampuzzo", "28", "#ffda59", "C", "2.3", 1612, true));
+        assert_eq!(d.start.get(&1), Some(&(1, 1)));
     }
 }

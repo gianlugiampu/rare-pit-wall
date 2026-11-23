@@ -8,6 +8,38 @@ export type Item = { on: boolean; opacity: number; scale: number; opts: Record<s
 export type Config = { edit: boolean; items: Record<string, Item> };
 
 export const DEFS: Record<string, Def> = {
+  relative: {
+    name: "Relative",
+    desc: "Le auto davanti e dietro a te in pista, con il distacco in secondi. Rosa = un giro avanti, azzurro = doppiato, viola = Rare.",
+    fields: [
+      { key: "header", label: "Intestazione (SOF e auto)", def: true },
+      { key: "lic", label: "Patente con SR e iRating", def: true },
+      { key: "classColor", label: "Colore di classe", def: true },
+      { key: "last", label: "Ultimo giro", def: false },
+      { key: "team", label: "Paese o team", def: false },
+    ],
+    choices: [
+      { key: "rows", label: "Auto davanti e dietro", options: [["1", "1 + 1"], ["2", "2 + 2"], ["3", "3 + 3"], ["4", "4 + 4"], ["5", "5 + 5"]], def: "3" },
+    ],
+  },
+  classifica: {
+    name: "Classifica",
+    desc: "La classifica della tua classe: distacchi, giri e posizioni guadagnate. Giro viola = il più veloce, verde = il tuo.",
+    fields: [
+      { key: "header", label: "Intestazione (giro e ora)", def: true },
+      { key: "chg", label: "Posizioni guadagnate / perse", def: true },
+      { key: "last", label: "Ultimo giro", def: true },
+      { key: "best", label: "Giro migliore", def: true },
+      { key: "classColor", label: "Colore di classe", def: true },
+      { key: "interval", label: "Distacco da chi precede", def: false },
+      { key: "lic", label: "Patente con SR e iRating", def: false },
+      { key: "pits", label: "Soste ai box", def: false },
+    ],
+    choices: [
+      { key: "rows", label: "Righe", options: [["top", "Primi 3 + intorno a te"], ["all", "Tutta la classe"]], def: "top" },
+      { key: "around", label: "Auto intorno a te", options: [["2", "2 + 2"], ["3", "3 + 3"], ["4", "4 + 4"], ["5", "5 + 5"]], def: "3" },
+    ],
+  },
   delta: {
     name: "Delta",
     desc: "Quanto sei avanti o indietro rispetto al giro di riferimento, con la barra verde/rossa.",

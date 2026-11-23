@@ -118,6 +118,7 @@ fn fetch_team(app: &AppHandle, shared: Arc<Shared>) {
             let v: serde_json::Value = r.json().await.unwrap_or_default();
             let ids: Vec<i64> = v["team"].as_array().cloned().unwrap_or_default().iter().filter_map(|t| t["custId"].as_i64()).collect();
             if !ids.is_empty() {
+                overlay::set_team(ids.clone());
                 *shared.team_ids.lock().unwrap() = ids;
             }
         }
@@ -795,7 +796,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(shared.clone())
         .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto, get_moments, jump_to_moment,
-            overlay::overlay_state, overlay::overlay_save, overlay::overlay_edit, overlay::overlay_reset, overlay::overlay_open_settings, overlay::overlay_hello])
+            overlay::overlay_state, overlay::overlay_save, overlay::overlay_edit, overlay::overlay_reset, overlay::overlay_open_settings, overlay::overlay_hello, overlay::overlay_drivers])
         .setup(move |app| {
             // Parte con Windows (si può togliere da Impostazioni → App → Avvio)
             {

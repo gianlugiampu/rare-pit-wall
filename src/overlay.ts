@@ -5,6 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { DEFS, item, opt, type Config, type Item } from "./overlay-defs";
+import { buildClassifica, buildRelative, demoCars, demoDrivers, setDrivers, type Car, type CarView, type Drivers } from "./overlay-cars";
 
 type Fast = {
   connected: boolean; onTrack: boolean; throttle: number; brake: number; clutch: number; steer: number; steerMax: number;
@@ -16,9 +17,10 @@ type Slow = {
   lastLap: number | null; bestLap: number | null; sessionBest: number | null;
   fuel: number; fuelMax: number | null; fuelAvg: number | null; fuelLast: number | null;
   incidents: number; incLimit: number | null; trackTemp: number | null; airTemp: number | null; flags: number; sectors: number[];
+  sessionState: number; lapsTotal: number | null; me: number; driversRev: number;
 };
-type Frame = { fast: Fast; slow?: Slow };
-type View = { el: HTMLElement; update: (f: Fast, s: Slow | null) => void };
+type Frame = { fast: Fast; slow?: Slow; cars?: Car[] };
+type View = { el: HTMLElement; update: (f: Fast, s: Slow | null, cars?: Car[] | null) => void };
 
 const IN_APP = "__TAURI_INTERNALS__" in window;
 const $zoom = document.getElementById("zoom") as HTMLElement;
@@ -295,7 +297,18 @@ function buildPedali(it: Item): View {
   };
 }
 
-const BUILDERS: Record<string, (it: Item) => View> = { delta: buildDelta, sessione: buildSessione, benzina: buildBenzina, pedali: buildPedali };
+/** Relative e Classifica: le righe si aggiornano con le auto (10 volte al secondo) */
+function carView(b: (it: Item) => CarView): (it: Item) => View {
+  return (it) => {
+    const v = b(it);
+    return { el: v.el, update: (_f, s, cars) => (cars ? v.update(cars, s ?? lastSlow) : undefined) };
+  };
+}
+
+const BUILDERS: Record<string, (it: Item) => View> = {
+  delta: buildDelta, sessione: buildSessione, benzina: buildBenzina, pedali: buildPedali,
+  relative: carView(buildRelative), classifica: carView(buildClassifica),
+};
 
 // ——— Dati finti (anteprima e modalità «sposta» senza iRacing) ———
 function demo(t: number): Frame {
@@ -312,8 +325,9 @@ function demo(t: number): Frame {
     slow: {
       session: "Race", lap: 14, lapsRemain: 6, timeRemain: 640, lastLap: 105.6, bestLap: 105.39, sessionBest: 105.21,
       fuel: 22.4, fuelMax: 45, fuelAvg: 2.61, fuelLast: 2.58, incidents: 4, incLimit: 17, trackTemp: 31.2, airTemp: 22.4, flags: 0x20,
-      sectors: [0, 0.33, 0.66],
+      sectors: [0, 0.33, 0.66], sessionState: 4, lapsTotal: 20, me: 5, driversRev: -1,
     },
+    cars: demoCars(t),
   };
 }
 
@@ -340,7 +354,7 @@ function build() {
   }
   $zoom.replaceChildren(view.el);
   $zoom.style.transform = `scale(${it.scale / 100})`;
-  if (lastFast) view.update(lastFast, lastSlow);
+  if (lastFast) view.update(lastFast, lastSlow, lastCars);
   fit();
 }
 
@@ -357,10 +371,21 @@ function fit() {
 }
 new ResizeObserver(fit).observe($zoom);
 
+let driversRev = -2;
+let lastCars: Car[] | null = null;
 function onFrame(fr: Frame) {
-  if (fr.slow) lastSlow = fr.slow;
+  if (fr.slow) {
+    lastSlow = fr.slow;
+    // l'elenco dei piloti si richiede solo quando cambia
+    if (fr.slow.driversRev !== driversRev && (id === "relative" || id === "classifica")) {
+      driversRev = fr.slow.driversRev;
+      if (driversRev === -1) setDrivers(demoDrivers());
+      else if (IN_APP) invoke<Drivers>("overlay_drivers").then(setDrivers);
+    }
+  }
+  if (fr.cars) lastCars = fr.cars;
   lastFast = fr.fast;
-  view?.update(fr.fast, fr.slow ?? null);
+  view?.update(fr.fast, fr.slow ?? null, fr.cars ?? null);
 }
 
 async function start() {

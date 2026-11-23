@@ -65,3 +65,48 @@ b { font-weight: 700; color: #fff; }
 .pedali .gear b:last-child { font-size: 11px; font-weight: 700; }
 .pedali .wheel { display: flex; align-items: center; justify-content: center; width: 40px; }
 .pedali .wheel svg { width: 34px; height: 34px; }
+
+/* Relative e Classifica (bozza v6): intestazione del sito sottile, righe da 22 px */
+.rows-panel { font-size: 12px; }
+.relative { width: 330px; }
+.classifica { width: 470px; }
+.head { position: relative; display: flex; align-items: center; gap: 8px; height: 26px; padding: 0 10px; overflow: hidden;
+  background: linear-gradient(90deg, #0c0015 0%, #2b0050 55%, #5e00a1 100%); }
+.head .pattern { position: absolute; inset: 0; opacity: .1; background: url("./assets/pattern-white.png") 0 0 / 640px repeat;
+  -webkit-mask-image: linear-gradient(90deg, transparent 35%, #000 85%); mask-image: linear-gradient(90deg, transparent 35%, #000 85%); }
+.head .stripes { position: absolute; top: 0; bottom: 0; right: -1.2rem; width: 5rem; transform: skewX(-18deg);
+  background: repeating-linear-gradient(90deg, rgb(255 255 255 / .07) 0 14px, transparent 14px 34px); }
+.head .mark { position: relative; width: 12px; height: 10px; background: url("./assets/r-mark.svg") center / contain no-repeat; }
+.head .t { position: relative; font-size: 11px; color: #fff; text-transform: uppercase; }
+.head .r { position: relative; margin-left: auto; font-size: 9.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--purple-200); }
+.row { display: flex; align-items: center; gap: 6px; height: 22px; padding-right: 8px; border-top: 1px solid rgb(255 255 255 / .05); white-space: nowrap; }
+.row.mine { border-top-color: transparent; background: linear-gradient(90deg, var(--purple-900), rgb(10 6 14 / 0) 80%); box-shadow: inset 2px 0 0 var(--rare-main); }
+.row.empty { justify-content: center; color: var(--ink-400); padding: 0 8px; }
+.row.cols { height: 18px; border-top: 0; font-size: 9.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-400); }
+.row .cls { align-self: stretch; width: 3px; flex: none; }
+.row .pill, .row .pill-w { width: 32px; flex: none; border-radius: 3px; text-align: center; font-size: 10.5px; font-weight: 700; line-height: 16px; background: var(--purple-900); color: var(--purple-200); }
+.row .pill-w { background: none; }
+.row .pill.p1 { background: var(--rare-main); color: #fff; }
+.row .num { width: 28px; flex: none; text-align: center; font-size: 11.5px; color: var(--purple-300); }
+.row .name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; color: #fff; }
+.row .name.me { font-weight: 700; }
+.row .name.rare { color: var(--purple-200); }
+.row .name.up { color: #ff9fb2; }
+.row .name.down { color: #7cc4ff; }
+.row .team { max-width: 70px; overflow: hidden; text-overflow: ellipsis; font-size: 10.5px; color: var(--ink-400); }
+.row .pit { flex: none; border-radius: 3px; padding: 0 4px; background: var(--lap-slow); color: #111; font-size: 9.5px; font-weight: 700; line-height: 14px; }
+.row .lic { display: flex; align-items: center; gap: 4px; flex: none; }
+.row .lic-h { width: 74px; text-align: right; }
+.row .chip { border-radius: 3px; padding: 0 4px; font-size: 10px; font-weight: 700; line-height: 15px; color: #fff; }
+.row .chip.dark { color: #0c0015; }
+.row .ir { width: 32px; text-align: right; font-size: 11px; color: var(--ink-400); }
+.row .gap { width: 48px; flex: none; text-align: right; font-weight: 700; color: var(--ink-200); }
+.relative .row .gap { width: 44px; }
+.row .gap.mine { color: #fff; }
+.row .t-last { width: 54px; flex: none; text-align: right; }
+.row .t-best { width: 58px; flex: none; text-align: right; }
+.row .t-best.best, .row .t-best.pb { font-weight: 700; }
+.row .chg { width: 24px; flex: none; font-size: 10px; font-weight: 700; }
+.row .pits { width: 24px; flex: none; text-align: right; }
+.sep { height: 3px; background: repeating-linear-gradient(90deg, rgb(255 255 255 / .15) 0 3px, transparent 3px 6px); margin: 0 8px; }
+.classifica .row.cols .gap, .classifica .row.cols .t-last, .classifica .row.cols .t-best { font-weight: 400; color: var(--ink-400); }

@@ -11,9 +11,9 @@ type State = { settings: Settings; edit: boolean; hidden: boolean; kinds: { id: 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const IN_APP = "__TAURI_INTERNALS__" in window;
 
-// Prossimi overlay (fasi P8.3–P8.6): in elenco, ma non ancora attivabili
+// Prossimi overlay (fasi P8.4–P8.6): in elenco, ma non ancora attivabili
 const SOON: [string, string][] = [
-  ["Relative", "P8.3"], ["Classifica", "P8.3"], ["Radar a luci", "P8.4"], ["Box del pit wall", "P8.4"], ["Mappa", "P8.6"],
+  ["Radar a luci", "P8.4"], ["Box del pit wall", "P8.4"], ["Mappa", "P8.6"],
 ];
 
 let st: State = {
