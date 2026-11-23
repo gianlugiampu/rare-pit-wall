@@ -36,3 +36,4 @@ Serve Rust (toolchain MSVC) con Visual Studio Build Tools (C++), poi `npm instal
   addestrata sul dataset [committa/serena-synthetic-it-27h](https://huggingface.co/datasets/committa/serena-synthetic-it-27h) (CC-BY 4.0).
   Piper e la voce si scaricano la prima volta dal programma (non sono in questo repository); `src-tauri/voices/serena.onnx.json`
   è la configurazione della voce senza 5 dittonghi inglesi che la versione 2023 di Piper non accetta.
+- Font degli overlay: Montserrat (SIL Open Font License 1.1) e Good Timing (font del brand del team).
