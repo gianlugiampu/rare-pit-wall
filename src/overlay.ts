@@ -10,7 +10,7 @@ import { buildClassifica, buildRelative, demoCars, demoDrivers, setDrivers, type
 type Fast = {
   connected: boolean; onTrack: boolean; throttle: number; brake: number; clutch: number; steer: number; steerMax: number;
   gear: number; speedKmh: number; rpm: number; lapPct: number; lapCur: number;
-  deltaBest: number | null; deltaSession: number | null; deltaLast: number | null;
+  deltaBest: number | null; deltaSession: number | null; deltaLast: number | null; carLr: number;
 };
 type Slow = {
   session: string; lap: number; lapsRemain: number | null; timeRemain: number | null;
@@ -297,6 +297,56 @@ function buildPedali(it: Item): View {
   };
 }
 
+// ——— Radar a luci (P8.4) ———
+let side = -1; // -1 = luce del bordo sinistro, 1 = destro
+function buildRadar(it: Item): View {
+  const el = document.createElement("div");
+  el.className = "radar";
+  const glow = Number(opt(it, "radar", "glow")) / 100;
+  let shown = -1;
+  return {
+    el,
+    update(f) {
+      // CarLeftRight: 2 sinistra, 3 destra, 4 ai due lati, 5 due a sinistra, 6 due a destra
+      const lr = f.carLr;
+      let level = side < 0 ? (lr === 2 || lr === 4 ? 1 : lr === 5 ? 2 : 0) : lr === 3 || lr === 4 ? 1 : lr === 6 ? 2 : 0;
+      if (cfg.edit && !live) level = 1; // in «sposta» si vede com'è
+      if (level === shown) return;
+      shown = level;
+      const c = level === 2 ? "255 77 106" : "255 150 40";
+      el.style.opacity = level ? "1" : "0";
+      el.style.background = `linear-gradient(${side < 0 ? "90deg" : "270deg"}, rgb(${c} / ${glow}) 0%, rgb(${c} / ${(glow * 0.3).toFixed(2)}) 40%, transparent 100%)`;
+    },
+  };
+}
+
+// ——— Box del pit wall (P8.4): compare solo quando arriva un messaggio ———
+let boxMsg: { author: string; text: string; at: number } | null = null;
+function buildBox(it: Item): View {
+  const el = document.createElement("div");
+  el.className = "panel box";
+  el.innerHTML = `<span class="tag">Box</span><b></b>${opt(it, "box", "author") ? `<span class="who"></span>` : ""}`;
+  const ms = Number(opt(it, "box", "duration")) * 1000;
+  el.hidden = true; // si vede solo quando arriva un messaggio
+  let last = "";
+  return {
+    el,
+    update() {
+      const m = cfg.edit ? { author: "Lupini", text: "Gestisci la benzina", at: Date.now() } : boxMsg;
+      const on = !!m && Date.now() - m.at < ms;
+      const key = on && m ? `${m.at}` : "";
+      if (key === last) return;
+      last = key;
+      el.hidden = !on;
+      if (on && m) {
+        (el.querySelector("b") as HTMLElement).textContent = m.text;
+        const who = el.querySelector(".who") as HTMLElement | null;
+        if (who) who.textContent = m.author;
+      }
+    },
+  };
+}
+
 /** Relative e Classifica: le righe si aggiornano con le auto (10 volte al secondo) */
 function carView(b: (it: Item) => CarView): (it: Item) => View {
   return (it) => {
@@ -308,6 +358,7 @@ function carView(b: (it: Item) => CarView): (it: Item) => View {
 const BUILDERS: Record<string, (it: Item) => View> = {
   delta: buildDelta, sessione: buildSessione, benzina: buildBenzina, pedali: buildPedali,
   relative: carView(buildRelative), classifica: carView(buildClassifica),
+  radar: buildRadar, box: buildBox,
 };
 
 // ——— Dati finti (anteprima e modalità «sposta» senza iRacing) ———
@@ -320,7 +371,7 @@ function demo(t: number): Frame {
     fast: {
       connected: true, onTrack: true, throttle: thr, brake: brk, clutch: 0, steer: Math.sin(t / 900) * 1.2, steerMax: 4,
       gear: ph < 0.55 ? 5 : 3, speedKmh: ph < 0.55 ? 212 : 128, rpm: 7000, lapPct: (t / 90000) % 1, lapCur: (t / 1000) % 105,
-      deltaBest: d, deltaSession: d + 0.4, deltaLast: d - 0.1,
+      deltaBest: d, deltaSession: d + 0.4, deltaLast: d - 0.1, carLr: [1, 2, 1, 4, 1, 6][Math.floor(t / 1500) % 6],
     },
     slow: {
       session: "Race", lap: 14, lapsRemain: 6, timeRemain: 640, lastLap: 105.6, bestLap: 105.39, sessionBest: 105.21,
@@ -334,6 +385,7 @@ function demo(t: number): Frame {
 // ——— Avvio ———
 const params = new URLSearchParams(location.search);
 let id = params.get("id") ?? "delta";
+side = Number(params.get("side") ?? -1);
 let cfg: Config = { edit: params.has("edit"), items: {} };
 let view: View | null = null;
 let lastSlow: Slow | null = null;
@@ -345,6 +397,13 @@ function build() {
   view = (BUILDERS[id] ?? buildDelta)(it);
   view.el.id = "root";
   view.el.style.setProperty("--bg-a", String(it.opacity / 100));
+  if (id === "radar") {
+    // il radar riempie la sua striscia al bordo dello schermo e non si sposta
+    $zoom.replaceChildren(view.el);
+    $zoom.style.transform = "none";
+    if (lastFast) view.update(lastFast, lastSlow, lastCars);
+    return;
+  }
   if (cfg.edit) {
     const drag = document.createElement("div");
     drag.id = "drag";
@@ -390,8 +449,10 @@ function onFrame(fr: Frame) {
 
 async function start() {
   if (IN_APP) {
-    const hello = await invoke<{ id: string; config: Config }>("overlay_hello");
+    const hello = await invoke<{ id: string; side: number; config: Config }>("overlay_hello");
     id = hello.id;
+    side = hello.side;
+    await listen<{ author: string; text: string }>("ov-box", (e) => (boxMsg = { ...e.payload, at: Date.now() }));
     cfg = hello.config;
     await listen<Config>("ov-config", (e) => {
       cfg = e.payload;

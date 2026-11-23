@@ -183,6 +183,7 @@ fn live_probe(app: &AppHandle, shared: Arc<Shared>, subsession: i64, session: St
 /// P5 · manda i dati al sito e riceve i messaggi del team
 fn live_send(app: &AppHandle, shared: Arc<Shared>, body: serde_json::Value) {
     let Some(token) = load_config(app).token else { return };
+    let app = app.clone();
     tauri::async_runtime::spawn(async move {
         let res = http().post(format!("{SITE}/api/pitwall/live")).bearer_auth(token).json(&body).send().await;
         let mut info = shared.live_info.lock().unwrap().clone();
@@ -197,6 +198,7 @@ fn live_send(app: &AppHandle, shared: Arc<Shared>, body: serde_json::Value) {
                         continue;
                     }
                     shared.radio.lock().unwrap().push(format!("Dal box: {text}"));
+                    overlay::push_box(&app, who, text);
                     info.messages.insert(0, format!("{who}: «{text}»"));
                     info.messages.truncate(3);
                 }

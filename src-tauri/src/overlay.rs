@@ -16,22 +16,42 @@ use tauri::{AppHandle, Emitter, EventTarget, Manager, PhysicalPosition, WebviewU
 
 use crate::irsdk;
 
-/// Overlay disponibili. `pos`: centro orizzontale e lato alto, in frazioni del monitor principale (posizione di partenza).
+/// Finestre degli overlay. `item`: l'overlay nelle impostazioni (il radar ha due finestre, una per lato);
+/// `pos`: centro orizzontale e lato alto, in frazioni del monitor principale (posizione di partenza);
+/// `on`: acceso di base; `edge`: -1/1 = striscia fissa al bordo sinistro/destro del monitor principale (radar a luci).
 pub struct Kind {
     pub id: &'static str,
+    pub item: &'static str,
     pub name: &'static str,
     size: (f64, f64),
     pos: (f64, f64),
+    on: bool,
+    edge: i8,
+}
+
+const fn kind(id: &'static str, name: &'static str, size: (f64, f64), pos: (f64, f64)) -> Kind {
+    Kind { id, item: id, name, size, pos, on: true, edge: 0 }
 }
 
 pub const KINDS: &[Kind] = &[
-    Kind { id: "relative", name: "Relative", size: (330.0, 180.0), pos: (0.16, 0.08) },
-    Kind { id: "classifica", name: "Classifica", size: (470.0, 260.0), pos: (0.84, 0.08) },
-    Kind { id: "delta", name: "Delta", size: (350.0, 74.0), pos: (0.5, 0.05) },
-    Kind { id: "sessione", name: "Sessione", size: (350.0, 26.0), pos: (0.5, 0.14) },
-    Kind { id: "benzina", name: "Benzina", size: (190.0, 130.0), pos: (0.88, 0.66) },
-    Kind { id: "pedali", name: "Pedali", size: (340.0, 74.0), pos: (0.66, 0.86) },
+    kind("relative", "Relative", (330.0, 180.0), (0.16, 0.08)),
+    kind("classifica", "Classifica", (470.0, 260.0), (0.84, 0.08)),
+    kind("delta", "Delta", (350.0, 74.0), (0.5, 0.05)),
+    kind("sessione", "Sessione", (350.0, 26.0), (0.5, 0.14)),
+    kind("benzina", "Benzina", (190.0, 130.0), (0.88, 0.66)),
+    kind("pedali", "Pedali", (340.0, 74.0), (0.66, 0.86)),
+    // P8.4: box del pit wall (spento di base, compare solo quando arriva un messaggio) e radar a luci
+    Kind { on: false, ..kind("box", "Box del pit wall", (330.0, 34.0), (0.16, 0.34)) },
+    Kind { item: "radar", edge: -1, ..kind("radar-sx", "Radar a luci", (45.0, 400.0), (0.0, 0.0)) },
+    Kind { item: "radar", edge: 1, ..kind("radar-dx", "Radar a luci", (45.0, 400.0), (0.0, 0.0)) },
 ];
+
+/// Overlay delle impostazioni (senza ripetere il radar)
+fn items() -> Vec<&'static str> {
+    let mut v: Vec<&str> = KINDS.iter().map(|k| k.item).collect();
+    v.dedup();
+    v
+}
 
 pub const SETTINGS_LABEL: &str = "overlay-impostazioni";
 
@@ -73,7 +93,8 @@ impl Default for Settings {
 
 impl Settings {
     fn item(&self, id: &str) -> Item {
-        self.items.get(id).cloned().unwrap_or_default()
+        let on = KINDS.iter().find(|k| k.item == id).map(|k| k.on).unwrap_or(true);
+        self.items.get(id).cloned().unwrap_or(Item { on, ..Default::default() })
     }
 }
 
@@ -136,9 +157,19 @@ fn position_for(app: &AppHandle, k: &Kind, s: &Settings) -> (i32, i32) {
     }
     let Some(m) = app.primary_monitor().ok().flatten() else { return (100, 100) };
     let (p, sz, f) = (m.position(), m.size(), m.scale_factor());
-    let scale = s.item(k.id).scale as f64 / 100.0;
+    let scale = s.item(k.item).scale as f64 / 100.0;
     let w = k.size.0 * f * scale;
     (p.x + (sz.width as f64 * k.pos.0 - w / 2.0) as i32, p.y + (sz.height as f64 * k.pos.1) as i32)
+}
+
+/// Radar a luci: striscia alta come il monitor principale, larga quanto scelto, al bordo sinistro o destro (pixel dello schermo)
+fn edge_rect(app: &AppHandle, k: &Kind, s: &Settings) -> (i32, i32, u32, u32) {
+    let Some(m) = app.primary_monitor().ok().flatten() else { return (0, 0, 45, 400) };
+    let (p, sz, f) = (m.position(), m.size(), m.scale_factor());
+    let width = s.item(k.item).opts.get("width").and_then(|v| v.as_f64()).unwrap_or(45.0).clamp(10.0, 300.0);
+    let w = (width * f).round() as u32;
+    let x = if k.edge < 0 { p.x } else { p.x + sz.width as i32 - w as i32 };
+    (x, p.y, w, sz.height)
 }
 
 fn label(id: &str) -> String {
@@ -178,14 +209,29 @@ pub fn sync(app: &AppHandle) {
         (s.clone(), st.edit, s.enabled && (st.edit || (!st.hidden && when)))
     };
     for k in KINDS {
-        let want = show && settings.item(k.id).on;
+        let want = show && settings.item(k.item).on;
         let existing = app.get_webview_window(&label(k.id));
+        // il radar non si sposta: resta sempre trasparente ai clic, al bordo dello schermo
+        let fixed = k.edge != 0;
         match (want, existing) {
-            (true, Some(w)) => click_through(&w, !edit),
+            (true, Some(w)) => {
+                click_through(&w, !edit || fixed);
+                if fixed {
+                    let (x, y, ww, hh) = edge_rect(app, k, &settings);
+                    let _ = w.set_size(tauri::PhysicalSize::new(ww, hh));
+                    let _ = w.set_position(PhysicalPosition::new(x, y));
+                }
+            }
             (true, None) => {
-                let (x, y) = position_for(app, k, &settings);
                 let f = app.primary_monitor().ok().flatten().map(|m| m.scale_factor()).unwrap_or(1.0);
-                let scale = settings.item(k.id).scale as f64 / 100.0;
+                let scale = settings.item(k.item).scale as f64 / 100.0;
+                let (x, y, size) = if fixed {
+                    let (x, y, ww, hh) = edge_rect(app, k, &settings);
+                    (x, y, (ww as f64 / f, hh as f64 / f))
+                } else {
+                    let (x, y) = position_for(app, k, &settings);
+                    (x, y, (k.size.0 * scale, k.size.1 * scale))
+                };
                 let built = WebviewWindowBuilder::new(app, label(k.id), WebviewUrl::App("overlay.html".into()))
                     .title(format!("Rare · {}", k.name))
                     .transparent(true)
@@ -196,12 +242,19 @@ pub fn sync(app: &AppHandle) {
                     .skip_taskbar(true)
                     .focused(false)
                     .focusable(false)
-                    .inner_size(k.size.0 * scale, k.size.1 * scale)
+                    .inner_size(size.0, size.1)
+                    // senza minimo: Windows altrimenti allarga le finestre strette (radar) a 136 pixel
+                    .min_inner_size(1.0, 1.0)
                     .position(x as f64 / f, y as f64 / f)
                     .build();
                 if let Ok(w) = built {
+                    if fixed {
+                        // alla creazione Windows impone 136 pixel di larghezza minima: si rimette la misura giusta
+                        let (_, _, ww, hh) = edge_rect(app, k, &settings);
+                        let _ = w.set_size(tauri::PhysicalSize::new(ww, hh));
+                    }
                     let _ = w.set_position(PhysicalPosition::new(x, y));
-                    click_through(&w, !edit);
+                    click_through(&w, !edit || fixed);
                 }
             }
             (false, Some(w)) => {
@@ -223,14 +276,14 @@ fn is_overlay_target(t: &EventTarget) -> bool {
 }
 
 fn config_payload(s: &Settings, edit: bool) -> serde_json::Value {
-    serde_json::json!({ "edit": edit, "items": KINDS.iter().map(|k| (k.id, s.item(k.id))).collect::<BTreeMap<_, _>>() })
+    serde_json::json!({ "edit": edit, "items": items().into_iter().map(|id| (id, s.item(id))).collect::<BTreeMap<_, _>>() })
 }
 
 /// Salva le posizioni degli overlay aperti per la combinazione di monitor attuale
 fn remember_positions(app: &AppHandle) {
     let key = monitor_key(app);
     let mut st = STATE.lock().unwrap();
-    for k in KINDS {
+    for k in KINDS.iter().filter(|k| k.edge == 0) {
         if let Some(w) = app.get_webview_window(&label(k.id)) {
             if let Ok(p) = w.outer_position() {
                 st.settings.layouts.entry(key.clone()).or_default().insert(k.id.into(), [p.x, p.y]);
@@ -287,6 +340,8 @@ struct Fast {
     delta_best: Option<f32>,
     delta_session: Option<f32>,
     delta_last: Option<f32>,
+    /// CarLeftRight: 2 auto a sinistra, 3 a destra, 4 ai due lati, 5 due a sinistra, 6 due a destra
+    car_lr: i32,
 }
 
 /// Dati lenti (4 volte al secondo): giri, tempi, benzina, sessione
@@ -509,6 +564,7 @@ fn start_reader(app: AppHandle) {
                     fast.delta_best = ok(s, "LapDeltaToBestLap_OK").then(|| f(s, "LapDeltaToBestLap"));
                     fast.delta_session = ok(s, "LapDeltaToSessionBestLap_OK").then(|| f(s, "LapDeltaToSessionBestLap"));
                     fast.delta_last = ok(s, "LapDeltaToSessionLastlLap_OK").then(|| f(s, "LapDeltaToSessionLastlLap"));
+                    fast.car_lr = s.get("CarLeftRight").map(|v| v.as_i32()).unwrap_or(0);
                     if s.session_info_update() != info_rev {
                         info_rev = s.session_info_update();
                         let yaml = s.session_info();
@@ -622,6 +678,11 @@ fn start_reader(app: AppHandle) {
     });
 }
 
+/// P8.4 · messaggio del team dal pit wall: compare nel «Box del pit wall» (se acceso)
+pub fn push_box(app: &AppHandle, author: &str, text: &str) {
+    let _ = app.emit_filter("ov-box", serde_json::json!({ "author": author, "text": text }), is_overlay_target);
+}
+
 /// Avvio: impostazioni dal disco, tasti rapidi e lettore
 pub fn init(app: &AppHandle) {
     let s: Settings = settings_path(app)
@@ -691,7 +752,7 @@ pub fn overlay_state(app: AppHandle) -> OverlayState {
         settings: st.settings.clone(),
         edit: st.edit,
         hidden: st.hidden,
-        kinds: KINDS.iter().map(|k| serde_json::json!({ "id": k.id, "name": k.name })).collect(),
+        kinds: items().into_iter().map(|id| serde_json::json!({ "id": id, "name": KINDS.iter().find(|k| k.item == id).map(|k| k.name).unwrap_or(id) })).collect(),
         has_layout: st.settings.layouts.contains_key(&key),
         monitors: key,
     }
@@ -729,7 +790,7 @@ pub async fn overlay_reset(app: AppHandle) {
         st.settings.clone()
     };
     save(&app, &s);
-    for k in KINDS {
+    for k in KINDS.iter().filter(|k| k.edge == 0) {
         if let Some(w) = app.get_webview_window(&label(k.id)) {
             let (x, y) = position_for(&app, k, &s);
             let _ = w.set_position(PhysicalPosition::new(x, y));
@@ -752,9 +813,12 @@ pub fn overlay_drivers() -> Drivers {
 #[tauri::command]
 pub fn overlay_hello(window: WebviewWindow) -> serde_json::Value {
     let st = STATE.lock().unwrap();
-    let id = window.label().trim_start_matches("ov-").to_string();
-    let name = KINDS.iter().find(|k| k.id == id).map(|k| k.name).unwrap_or("");
-    serde_json::json!({ "id": id, "name": name, "config": config_payload(&st.settings, st.edit) })
+    let win = window.label().trim_start_matches("ov-").to_string();
+    let k = KINDS.iter().find(|k| k.id == win);
+    serde_json::json!({
+        "id": k.map(|k| k.item).unwrap_or(&win), "name": k.map(|k| k.name).unwrap_or(""), "side": k.map(|k| k.edge).unwrap_or(0),
+        "config": config_payload(&st.settings, st.edit),
+    })
 }
 
 #[cfg(test)]

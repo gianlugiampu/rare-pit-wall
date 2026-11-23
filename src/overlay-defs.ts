@@ -3,8 +3,10 @@
 
 export type Field = { key: string; label: string; def: boolean };
 export type Choice = { key: string; label: string; options: [string, string][]; def: string };
-export type Def = { name: string; desc: string; fields: Field[]; choices?: Choice[] };
-export type Item = { on: boolean; opacity: number; scale: number; opts: Record<string, boolean | string> };
+export type Range = { key: string; label: string; min: number; max: number; step: number; def: number; unit: string };
+/** `defOn`: acceso di base (se manca: sì); `noLook`: niente sfondo e grandezza (radar); `ranges`: cursori propri */
+export type Def = { name: string; desc: string; fields: Field[]; choices?: Choice[]; ranges?: Range[]; defOn?: boolean; noLook?: boolean };
+export type Item = { on: boolean; opacity: number; scale: number; opts: Record<string, boolean | string | number> };
 export type Config = { edit: boolean; items: Record<string, Item> };
 
 export const DEFS: Record<string, Def> = {
@@ -64,6 +66,23 @@ export const DEFS: Record<string, Def> = {
       },
     ],
   },
+  box: {
+    name: "Box del pit wall",
+    desc: "I messaggi che il team ti manda dal pit wall, a schermo (oltre alla voce). Compare solo quando arriva un messaggio.",
+    defOn: false,
+    fields: [{ key: "author", label: "Chi lo manda", def: true }],
+    choices: [{ key: "duration", label: "Resta a schermo", options: [["5", "5 secondi"], ["8", "8 secondi"], ["12", "12 secondi"]], def: "8" }],
+  },
+  radar: {
+    name: "Radar a luci",
+    desc: "Due luci ai bordi dello schermo: si accende il lato dove c'è un'auto affiancata. Arancio con un'auto, rosso con due (tre affiancati).",
+    noLook: true,
+    fields: [],
+    ranges: [
+      { key: "width", label: "Larghezza", min: 15, max: 150, step: 5, def: 45, unit: " px" },
+      { key: "glow", label: "Intensità", min: 10, max: 100, step: 5, def: 50, unit: "%" },
+    ],
+  },
   sessione: {
     name: "Sessione",
     desc: "Una riga con giri o tempo alla fine, incidenti, temperature, bandiera e ora.",
@@ -105,13 +124,13 @@ export const DEFS: Record<string, Def> = {
 export const ITEM_DEFAULT: Item = { on: true, opacity: 86, scale: 100, opts: {} };
 
 export function item(cfg: Config | undefined, id: string): Item {
-  return { ...ITEM_DEFAULT, ...(cfg?.items?.[id] ?? {}) };
+  return { ...ITEM_DEFAULT, on: DEFS[id]?.defOn ?? true, ...(cfg?.items?.[id] ?? {}) };
 }
 
 /** Valore di una casella o di una scelta, con il valore di base se non è mai stata toccata */
-export function opt(it: Item, id: string, key: string): boolean | string {
+export function opt(it: Item, id: string, key: string): boolean | string | number {
   const v = it.opts?.[key];
   if (v !== undefined) return v;
   const d = DEFS[id];
-  return d?.fields.find((f) => f.key === key)?.def ?? d?.choices?.find((c) => c.key === key)?.def ?? false;
+  return d?.fields.find((f) => f.key === key)?.def ?? d?.choices?.find((c) => c.key === key)?.def ?? d?.ranges?.find((r) => r.key === key)?.def ?? false;
 }

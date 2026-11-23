@@ -11,9 +11,9 @@ type State = { settings: Settings; edit: boolean; hidden: boolean; kinds: { id: 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const IN_APP = "__TAURI_INTERNALS__" in window;
 
-// Prossimi overlay (fasi P8.4–P8.6): in elenco, ma non ancora attivabili
+// Prossimi overlay (fase P8.6): in elenco, ma non ancora attivabili
 const SOON: [string, string][] = [
-  ["Radar a luci", "P8.4"], ["Box del pit wall", "P8.4"], ["Mappa", "P8.6"],
+  ["Mappa", "P8.6"],
 ];
 
 let st: State = {
@@ -22,7 +22,7 @@ let st: State = {
 };
 let sel = "delta";
 
-const it = (id: string): Item => ({ ...ITEM_DEFAULT, ...(st.settings.items[id] ?? {}), opts: { ...(st.settings.items[id]?.opts ?? {}) } });
+const it = (id: string): Item => ({ ...ITEM_DEFAULT, ...(st.settings.items[id] ?? { on: DEFS[id]?.defOn ?? true }), opts: { ...(st.settings.items[id]?.opts ?? {}) } });
 
 function save() {
   const s = st.settings;
@@ -114,8 +114,13 @@ function renderDetail() {
   k1.className = "k";
   k1.textContent = "Aspetto";
   box.append(k1);
-  slider("Sfondo", 0, 100, 5, i.opacity, "%", (v) => setItem(sel, (x) => (x.opacity = v)));
-  slider("Grandezza", 60, 200, 5, i.scale, "%", (v) => setItem(sel, (x) => (x.scale = v)));
+  if (!d.noLook) {
+    slider("Sfondo", 0, 100, 5, i.opacity, "%", (v) => setItem(sel, (x) => (x.opacity = v)));
+    slider("Grandezza", 60, 200, 5, i.scale, "%", (v) => setItem(sel, (x) => (x.scale = v)));
+  }
+  for (const r of d.ranges ?? []) {
+    slider(r.label, r.min, r.max, r.step, Number(opt(i, sel, r.key)), r.unit, (v) => setItem(sel, (x) => (x.opts[r.key] = v)));
+  }
 
   for (const c of d.choices ?? []) {
     const l = document.createElement("label");
@@ -144,7 +149,7 @@ function renderDetail() {
     l.append(cb, f.label);
     grid.append(l);
   }
-  box.append(k2, grid);
+  if (d.fields.length) box.append(k2, grid);
 }
 
 window.addEventListener("DOMContentLoaded", async () => {
