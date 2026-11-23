@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Rare Pit Wall · Overlay</title>
+    <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/overlay-settings.css" />
+    <script type="module" src="/src/overlay-settings.ts" defer></script>
+  </head>
+  <body>
+    <header class="bar">
+      <img src="/src/assets/r-mark.svg" alt="" />
+      <b class="d">OVERLAY IN GIOCO</b>
+    </header>
+    <div class="ov-wrap">
+      <section class="ov-general">
+        <label class="live-row"><span>Overlay attivi</span><input type="checkbox" id="g-enabled" class="switch" /></label>
+        <label class="field">Quando si vedono
+          <select id="g-show">
+            <option value="pista">Solo quando sei in macchina</option>
+            <option value="iracing">Con iRacing aperto (anche nei replay)</option>
+            <option value="sempre">Sempre</option>
+          </select>
+        </label>
+        <div class="ov-buttons">
+          <button type="button" id="g-edit">Sposta gli overlay</button>
+          <button type="button" id="g-reset" class="ghost">Rimetti al posto di partenza</button>
+        </div>
+        <p id="g-edit-hint" class="small" hidden>Trascina gli overlay dove vuoi (anche sugli altri monitor), poi premi «Blocca e salva».</p>
+        <p class="small">Tasti rapidi, anche dentro iRacing: <b>Ctrl+Maiusc+O</b> mostra/nasconde · <b>Ctrl+Maiusc+M</b> sposta/blocca.</p>
+        <p class="small">iRacing deve essere in <b>finestra a schermo intero</b> (opzioni grafiche → «Borderless»), non in schermo intero esclusivo. In VR gli overlay non si vedono.</p>
+        <p id="g-monitors" class="small"></p>
+      </section>
+      <div class="ov-cols">
+        <ul id="list" class="ov-list"></ul>
+        <section id="detail" class="ov-detail"></section>
+      </div>
+    </div>
+  </body>
+</html>

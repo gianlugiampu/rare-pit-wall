@@ -1,6 +1,6 @@
 [package]
 name = "rare-pit-wall"
-version = "0.7.1"
+version = "0.8.0"
 description = "Rare Pit Wall · programma per Windows del team Rare Project Motorsport"
 authors = ["Rare Project Motorsport"]
 edition = "2024"
@@ -25,6 +25,7 @@ serde_json = "1"
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-updater = "2"
+tauri-plugin-global-shortcut = "2"
 tiny_http = "0.12"
 qrcode = { version = "0.14", default-features = false, features = ["svg"] }
 local-ip-address = "0.6"

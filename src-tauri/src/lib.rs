@@ -7,6 +7,7 @@ mod engineer;
 mod irsdk;
 mod live;
 mod moments;
+mod overlay;
 mod voice;
 
 use serde::{Deserialize, Serialize};
@@ -793,7 +794,8 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(shared.clone())
-        .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto, get_moments, jump_to_moment])
+        .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto, get_moments, jump_to_moment,
+            overlay::overlay_state, overlay::overlay_save, overlay::overlay_edit, overlay::overlay_reset, overlay::overlay_open_settings, overlay::overlay_hello])
         .setup(move |app| {
             // Parte con Windows (si può togliere da Impostazioni → App → Avvio)
             {
@@ -802,9 +804,11 @@ pub fn run() {
             }
             // Icona vicino all'orologio con menu
             let open = MenuItem::with_id(app, "open", "Apri Rare Pit Wall", true, None::<&str>)?;
+            let ov = MenuItem::with_id(app, "overlay", "Overlay in gioco…", true, None::<&str>)?;
+            let ov_edit = MenuItem::with_id(app, "overlay-edit", "Sposta / blocca overlay (Ctrl+Maiusc+M)", true, None::<&str>)?;
             let update = MenuItem::with_id(app, "update", "Cerca aggiornamenti", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "Esci", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&open, &update, &quit])?;
+            let menu = Menu::with_items(app, &[&open, &ov, &ov_edit, &update, &quit])?;
             let tray = TrayIconBuilder::with_id("main")
                 .icon(Image::from_bytes(TRAY_IDLE)?)
                 .tooltip("Rare Pit Wall · in attesa di iRacing")
@@ -816,6 +820,8 @@ pub fn run() {
                         show_window(app);
                         check_update_soon(app, true);
                     }
+                    "overlay" => overlay::open_settings(app),
+                    "overlay-edit" => overlay::toggle_edit(app),
                     "quit" => app.exit(0),
                     _ => {}
                 })
@@ -844,14 +850,46 @@ pub fn run() {
             // P3: cruscotto sul telefono (mini sito sulla rete di casa)
             *shared.dash_url.lock().unwrap() = dash::start(shared.dash.clone());
             start_reader(app.handle().clone(), shared.clone());
+            // P8: overlay in gioco, con i tasti rapidi Ctrl+Maiusc+O (mostra/nascondi) e Ctrl+Maiusc+M (sposta/blocca)
+            overlay::init(app.handle());
+            {
+                use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+                let (toggle, edit) = overlay::shortcuts();
+                app.handle().plugin(
+                    tauri_plugin_global_shortcut::Builder::new()
+                        .with_handler(move |app, sc, ev| {
+                            if ev.state() == ShortcutState::Pressed {
+                                if *sc == toggle {
+                                    overlay::toggle_hidden(app);
+                                } else if *sc == edit {
+                                    overlay::toggle_edit(app);
+                                }
+                            }
+                        })
+                        .build(),
+                )?;
+                for sc in [toggle, edit] {
+                    if let Err(e) = app.global_shortcut().register(sc) {
+                        site_log(load_config(app.handle()).token, format!("tasto rapido degli overlay non registrato: {e}"));
+                    }
+                }
+            }
             start_updater(app.handle().clone(), shared.clone());
             Ok(())
         })
         .on_window_event(|w, e| {
             // Chiudere la finestra la nasconde: il programma resta vicino all'orologio
+            // (solo la finestrella principale: le altre si chiudono davvero)
             if let WindowEvent::CloseRequested { api, .. } = e {
-                api.prevent_close();
-                let _ = w.hide();
+                if w.label() == "main" {
+                    api.prevent_close();
+                    let _ = w.hide();
+                }
+            }
+            if let WindowEvent::Destroyed = e {
+                if w.label() == overlay::SETTINGS_LABEL {
+                    overlay::on_settings_closed(w.app_handle());
+                }
             }
         })
         .run(tauri::generate_context!())

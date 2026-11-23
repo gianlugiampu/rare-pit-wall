@@ -1,0 +1,67 @@
+/* P8 · Overlay Rare: stile della bozza v6 approvata (colori e font del sito) */
+@font-face { font-family: "Good Timing"; src: url("./assets/good-timing-bd.woff2") format("woff2"); font-weight: 700; }
+@font-face { font-family: "Montserrat"; src: url("./assets/montserrat-latin.woff2") format("woff2"); font-weight: 400 700; }
+:root {
+  --rare-main: #9600ff; --purple-200: #cf94ff; --purple-300: #b55cff; --purple-900: #26003f;
+  --ink-200: #c9c2d4; --ink-400: #8e86a0;
+  --lap-best: #b55cff; --lap-pb: #3ddc84; --lap-slow: #ffc93c; --lap-invalid: #ff4d6a;
+  --bg-a: .86;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; margin: 0; }
+[hidden] { display: none !important; }
+html, body { background: transparent; overflow: hidden; }
+body { font: 12px/1.3 Montserrat, "Segoe UI", sans-serif; color: var(--ink-200); user-select: none; cursor: default; }
+b { font-weight: 700; color: #fff; }
+.tab { font-variant-numeric: tabular-nums; }
+.d { font-family: "Good Timing", "Segoe UI", sans-serif; font-weight: 700; }
+
+#zoom { transform-origin: 0 0; display: inline-block; }
+.panel { position: relative; overflow: hidden; border-radius: 8px; background: rgb(10 6 14 / var(--bg-a)); box-shadow: 0 0 0 1px rgb(255 255 255 / .06) inset; }
+.muted { color: var(--ink-400); }
+.pb { color: var(--lap-pb) !important; }
+.bad { color: var(--lap-invalid) !important; }
+.slow { color: var(--lap-slow) !important; }
+.best { color: var(--lap-best) !important; }
+
+/* Modalità «sposta»: bordo tratteggiato, nome dell'overlay e tutta la finestra trascinabile */
+#drag { position: absolute; inset: 0; z-index: 9; cursor: move; border: 1px dashed var(--purple-300); border-radius: 8px; background: rgb(150 0 255 / .08); }
+#drag span { position: absolute; left: 6px; top: -1px; padding: 1px 6px; border-radius: 0 0 4px 4px; background: var(--rare-main); color: #fff; font: 700 10px Montserrat, sans-serif; text-transform: uppercase; letter-spacing: .08em; pointer-events: none; }
+
+/* Delta */
+.delta { width: 350px; }
+.delta .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px 0; font-size: 11px; }
+.delta .top > span { flex: 1; }
+.delta .top > span:last-child { text-align: right; }
+.delta .big { flex: none !important; font-size: 28px; line-height: 1; color: #fff; min-width: 96px; text-align: center; }
+.delta .bar { position: relative; margin: 6px 10px; height: 8px; border-radius: 2px; background: rgb(255 255 255 / .1); }
+.delta .bar i { position: absolute; top: 0; height: 100%; background: var(--lap-pb); }
+.delta .bar em { position: absolute; left: 50%; top: -3px; width: 2px; height: 14px; margin-left: -1px; background: #fff; }
+.delta .bottom { display: flex; justify-content: space-between; gap: 8px; padding: 0 10px 6px; font-size: 11px; }
+.delta .bottom:empty { display: none; }
+.delta.only-big .top { padding-bottom: 6px; }
+
+/* Sessione: una riga */
+.sessione { display: flex; align-items: center; gap: 16px; height: 26px; padding: 0 12px; white-space: nowrap; width: max-content; min-width: 120px; }
+.flag { border-radius: 3px; padding: 0 6px; font-size: 10px; font-weight: 700; line-height: 16px; color: #fff; }
+
+/* Benzina: righe etichetta → valore */
+.benzina { width: 190px; }
+.kv { display: flex; align-items: center; justify-content: space-between; height: 21px; padding: 0 8px; }
+.kv:nth-child(odd) { background: rgb(255 255 255 / .025); }
+.kv span:first-child { color: var(--ink-400); }
+.kv span:last-child { font-weight: 700; color: #fff; }
+.tank { height: 3px; background: rgb(255 255 255 / .1); }
+.tank i { display: block; height: 100%; background: var(--lap-pb); }
+
+/* Pedali */
+.pedali { display: flex; align-items: stretch; gap: 8px; padding: 6px; height: 74px; width: max-content; }
+.pedali svg { width: 240px; height: 100%; display: block; }
+.pedali .bars { display: flex; align-items: flex-end; gap: 3px; }
+.pedali .bars span { position: relative; width: 7px; height: 100%; border-radius: 1px; background: rgb(255 255 255 / .1); }
+.pedali .bars i { position: absolute; bottom: 0; left: 0; width: 100%; border-radius: 1px; }
+.pedali .gear { display: flex; width: 48px; flex-direction: column; align-items: center; justify-content: center; }
+.pedali .gear b:first-child { font-size: 34px; line-height: 1; color: var(--purple-200); }
+.pedali .gear b:last-child { font-size: 11px; font-weight: 700; }
+.pedali .wheel { display: flex; align-items: center; justify-content: center; width: 40px; }
+.pedali .wheel svg { width: 34px; height: 34px; }

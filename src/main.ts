@@ -180,6 +180,8 @@ window.addEventListener("DOMContentLoaded", async () => {
       invoke("set_live_auto", { on: false });
     }
   });
+  // P8: impostazioni degli overlay in una finestra a parte
+  $("open-overlay").addEventListener("click", () => invoke("overlay_open_settings"));
   $("open-profile").addEventListener("click", (e) => {
     e.preventDefault();
     openUrl(`${SITE}/app/profilo#pitwall`);
