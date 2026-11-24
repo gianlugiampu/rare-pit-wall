@@ -16,7 +16,7 @@ type Slow = {
   session: string; lap: number; lapsRemain: number | null; timeRemain: number | null;
   lastLap: number | null; bestLap: number | null; sessionBest: number | null;
   fuel: number; fuelMax: number | null; fuelAvg: number | null; fuelLast: number | null;
-  incidents: number; incLimit: number | null; trackTemp: number | null; airTemp: number | null; flags: number; sectors: number[];
+  incidents: number; incLimit: number | null; trackTemp: number | null; airTemp: number | null; flags: number; sectors: number[]; trackLenM?: number | null;
   sessionState: number; lapsTotal: number | null; me: number; driversRev: number; mapRev: number; mapProgress: number | null;
 };
 type Frame = { fast: Fast; slow?: Slow; cars?: Car[] };
@@ -303,7 +303,7 @@ function buildPedali(it: Item): View {
 }
 
 // ——— Radar a luci (P8.4) ———
-let side = -1; // -1 = luce del bordo sinistro, 1 = destro
+let side = -1; // -1 = luce del bordo sinistro, 1 = destro, 0 = radar a barre
 function buildRadar(it: Item): View {
   const el = document.createElement("div");
   el.className = "radar";
@@ -321,6 +321,85 @@ function buildRadar(it: Item): View {
       const c = level === 2 ? "255 77 106" : "255 150 40";
       el.style.opacity = level ? "1" : "0";
       el.style.background = `linear-gradient(${side < 0 ? "90deg" : "270deg"}, rgb(${c} / ${glow}) 0%, rgb(${c} / ${(glow * 0.3).toFixed(2)}) 40%, transparent 100%)`;
+    },
+  };
+}
+
+// ——— Radar a barre: due barre ai lati della tua auto, il segmento è l'auto affiancata ———
+const CAR_M = 4.7; // lunghezza di un'auto (circa)
+const RANGE = 1.6; // la barra copre da 1,6 auto davanti a 1,6 dietro
+function buildRadarBars(it: Item): View {
+  const h = Number(opt(it, "radar", "barHeight")) || 240;
+  const gap = Number(opt(it, "radar", "barGap")) || 200;
+  const el = document.createElement("div");
+  el.className = "rbars";
+  el.style.width = `${gap + 24}px`;
+  el.style.height = `${h + 8}px`;
+  const mk = (side: string) => {
+    const b = document.createElement("div");
+    b.className = `rbar ${side}`;
+    b.style.height = `${h}px`;
+    b.innerHTML = `<em></em><i></i><i></i>`;
+    el.append(b);
+    return b;
+  };
+  const L = mk("l"), R = mk("r");
+  const carH = h / (RANGE * 2);
+  const place = (bar: HTMLElement, cars: number[]) => {
+    const segs = bar.querySelectorAll("i");
+    segs.forEach((s, k) => {
+      const pos = cars[k];
+      const seg = s as HTMLElement;
+      if (pos == null) {
+        seg.style.display = "none";
+        return;
+      }
+      const overlap = 1 - Math.min(1, Math.abs(pos));
+      const c = overlap > 0.5 ? "255 77 106" : "255 150 40";
+      seg.style.display = "block";
+      seg.style.height = `${carH}px`;
+      seg.style.top = `${h / 2 - pos * carH - carH / 2}px`;
+      seg.style.background = `rgb(${c})`;
+      seg.style.boxShadow = `0 0 12px rgb(${c} / .7)`;
+    });
+    bar.classList.toggle("on", cars.length > 0 || cfg.edit);
+  };
+  return {
+    el,
+    update(f, _s, cars) {
+      // in «sposta» senza iRacing: un esempio, per vedere misura e posizione
+      if (cfg.edit && !live) {
+        place(L, [-0.5]);
+        place(R, [0.1]);
+        return;
+      }
+      const lr = f.carLr;
+      const sides = lr === 2 ? ["l"] : lr === 3 ? ["r"] : lr === 4 ? ["l", "r"] : lr === 5 ? ["l", "l"] : lr === 6 ? ["r", "r"] : [];
+      if (!sides.length || !cars) {
+        if (!sides.length) { place(L, []); place(R, []); }
+        return;
+      }
+      // auto vicine in pista (in lunghezze d'auto, + = davanti), le più vicine sono quelle affiancate
+      const s = lastSlow;
+      const me = s?.me ?? -1;
+      const Lm = s?.trackLenM ?? 4000;
+      const near = cars
+        .filter((c) => c.i !== me && c.surf !== -1)
+        .map((c) => {
+          let d = (c.pct - f.lapPct) * Lm;
+          if (d > Lm / 2) d -= Lm;
+          if (d < -Lm / 2) d += Lm;
+          return d / CAR_M;
+        })
+        .filter((d) => Math.abs(d) < RANGE)
+        .sort((a, b) => Math.abs(a) - Math.abs(b))
+        .slice(0, sides.length);
+      const left: number[] = [], right: number[] = [];
+      near.forEach((d, k) => (sides[k] === "l" ? left : right).push(d));
+      // se un'auto c'è ma non risulta ancora vicina (dati in ritardo), si mostra ruota a ruota
+      if (!near.length) sides.forEach((sd) => (sd === "l" ? left : right).push(0));
+      place(L, left);
+      place(R, right);
     },
   };
 }
@@ -397,7 +476,7 @@ function demo(t: number): Frame {
 // ——— Avvio ———
 const params = new URLSearchParams(location.search);
 let id = params.get("id") ?? "delta";
-side = Number(params.get("side") ?? -1);
+side = Number(params.get("side") ?? (params.get("id") === "radar" ? 0 : -1));
 let cfg: Config = { edit: params.has("edit"), items: {} };
 // solo anteprima nel browser: ?scala=150&opts=pct,clutch per provare grandezza e caselle
 if (params.has("scala") || params.has("opts")) {
@@ -415,8 +494,12 @@ function build() {
   view = (BUILDERS[id] ?? buildDelta)(it);
   view.el.id = "root";
   view.el.style.setProperty("--bg-a", String(it.opacity / 100));
-  if (id === "radar") {
-    // il radar riempie la sua striscia al bordo dello schermo e non si sposta
+  if (id === "radar" && side === 0) {
+    // radar a barre: si sposta e si ridimensiona come gli altri overlay
+    view = buildRadarBars(it);
+  }
+  if (id === "radar" && side !== 0) {
+    // il radar a luci riempie la sua striscia al bordo dello schermo e non si sposta
     $zoom.replaceChildren(view.el);
     $zoom.style.transform = "none";
     if (lastFast) view.update(lastFast, lastSlow, lastCars);

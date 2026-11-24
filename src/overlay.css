@@ -155,3 +155,12 @@ b { font-weight: 700; color: #fff; }
 
 /* Pedali: percentuali (facoltative) */
 .classifica .row.cols .ird { font-weight: 400; color: var(--ink-400); }
+
+/* Radar a barre */
+.rbars { position: relative; }
+.rbar { position: absolute; top: 4px; width: 12px; border-radius: 99px; background: rgb(10 6 14 / .55); box-shadow: 0 0 0 1px rgb(255 255 255 / .12); opacity: 0; transition: opacity .15s; }
+.rbar.on { opacity: 1; }
+.rbar.l { left: 6px; }
+.rbar.r { right: 6px; }
+.rbar em { position: absolute; left: -5px; right: -5px; top: 50%; height: 2px; margin-top: -1px; border-radius: 2px; background: rgb(255 255 255 / .7); }
+.rbar i { position: absolute; left: 0; right: 0; border-radius: 99px; display: none; }

@@ -43,6 +43,8 @@ pub const KINDS: &[Kind] = &[
     kind("mappa", "Mappa", (230.0, 170.0), (0.1, 0.55)),
     // P8.4: box del pit wall (spento di base, compare solo quando arriva un messaggio) e radar a luci
     Kind { on: false, ..kind("box", "Box del pit wall", (330.0, 34.0), (0.16, 0.34)) },
+    // radar a barre: due barre ai lati della tua auto, spostabili e ridimensionabili (scelta di Gianluca del 24/11/2026)
+    Kind { item: "radar", ..kind("radar-barre", "Radar", (220.0, 250.0), (0.5, 0.32)) },
     Kind { item: "radar", edge: -1, ..kind("radar-sx", "Radar a luci", (45.0, 400.0), (0.0, 0.0)) },
     Kind { item: "radar", edge: 1, ..kind("radar-dx", "Radar a luci", (45.0, 400.0), (0.0, 0.0)) },
 ];
@@ -210,7 +212,13 @@ pub fn sync(app: &AppHandle) {
         (s.clone(), st.edit, s.enabled && (st.edit || (!st.hidden && when)))
     };
     for k in KINDS {
-        let want = show && settings.item(k.item).on;
+        let mut want = show && settings.item(k.item).on;
+        // radar: barre, luci ai bordi o tutte e due (di base le barre)
+        if k.item == "radar" {
+            let style = settings.item("radar").opts.get("style").and_then(|v| v.as_str()).unwrap_or("barre").to_string();
+            let bars = k.edge == 0;
+            want = want && (style == "entrambe" || (bars && style == "barre") || (!bars && style == "luci"));
+        }
         let existing = app.get_webview_window(&label(k.id));
         // il radar non si sposta: resta sempre trasparente ai clic, al bordo dello schermo
         let fixed = k.edge != 0;
@@ -408,6 +416,8 @@ struct Slow {
     /// P8.6: versione della mappa della pista e avanzamento del giro che la sta disegnando
     map_rev: i32,
     map_progress: Option<f32>,
+    /// lunghezza della pista in metri (radar a barre)
+    track_len_m: Option<f32>,
 }
 
 /// P8.3 · un'auto in pista (10 volte al secondo, solo con Relative o Classifica aperti)
@@ -647,6 +657,10 @@ fn start_reader(app: AppHandle) {
                         let pct = irsdk::yaml_value(&yaml, "DriverCarMaxFuelPct", None).and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0);
                         slow.fuel_max = max.map(|m| m * pct).filter(|m| *m > 0.0);
                         slow.sectors = sectors(&yaml);
+                        // «TrackLength: 7.00 km»
+                        slow.track_len_m = irsdk::yaml_value(&yaml, "TrackLength", None)
+                            .and_then(|v| v.split_whitespace().next().and_then(|n| n.parse::<f32>().ok()))
+                            .map(|km| km * 1000.0);
                         slow.drivers_rev = info_rev;
                         *DRIVERS.lock().unwrap() = parse_drivers(&yaml, info_rev);
                         // pista e configurazione: si carica la mappa già disegnata, se c'è
@@ -738,7 +752,10 @@ fn start_reader(app: AppHandle) {
             // P8.5: una pagina per OBS ha chiesto i dati negli ultimi 5 secondi
             let obs = OBS_SEEN.lock().unwrap().map(|t| t.elapsed() < Duration::from_secs(5)).unwrap_or(false);
             let open = windows || obs;
-            let need_cars = tick % 6 == 0 && (obs || ["relative", "classifica", "mappa"].iter().any(|id| app.get_webview_window(&label(id)).is_some()));
+            // il radar a barre vuole le auto più spesso (30 volte al secondo) per muoversi fluido
+            let bars_open = app.get_webview_window(&label("radar-barre")).is_some();
+            let need_cars = (bars_open && tick % 2 == 0)
+                || (tick % 6 == 0 && (obs || ["relative", "classifica", "mappa"].iter().any(|id| app.get_webview_window(&label(id)).is_some())));
             let mut cars: Vec<Car> = vec![];
             if let (true, Some(s)) = (need_cars && fast.connected, sdk.as_mut()) {
                 let gi = |s: &mut irsdk::Irsdk, k: &str, i: usize| s.get_at(k, i).map(|v| v.as_i32()).unwrap_or(0);

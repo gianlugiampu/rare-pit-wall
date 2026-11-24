@@ -76,13 +76,16 @@ export const DEFS: Record<string, Def> = {
     choices: [{ key: "duration", label: "Resta a schermo", options: [["5", "5 secondi"], ["8", "8 secondi"], ["12", "12 secondi"]], def: "8" }],
   },
   radar: {
-    name: "Radar a luci",
-    desc: "Due luci ai bordi dello schermo: si accende il lato dove c'è un'auto affiancata. Arancio con un'auto, rosso con due (tre affiancati).",
+    name: "Radar",
+    desc: "Barre ai lati della tua auto (il segmento mostra dove si trova l'auto affiancata: in alto davanti, in basso dietro) e/o luci ai bordi dello schermo. Arancio = vi sovrapponete in parte, rosso = affiancati.",
     noLook: true,
     fields: [],
+    choices: [{ key: "style", label: "Tipo", options: [["barre", "Barre (si spostano con Ctrl+Maiusc+M)"], ["luci", "Luci ai bordi dello schermo"], ["entrambe", "Tutte e due"]], def: "barre" }],
     ranges: [
-      { key: "width", label: "Larghezza", min: 15, max: 150, step: 5, def: 45, unit: " px" },
-      { key: "glow", label: "Intensità", min: 10, max: 100, step: 5, def: 50, unit: "%" },
+      { key: "barHeight", label: "Barre: altezza", min: 120, max: 480, step: 10, def: 240, unit: " px" },
+      { key: "barGap", label: "Barre: distanza", min: 60, max: 600, step: 10, def: 200, unit: " px" },
+      { key: "width", label: "Luci: larghezza", min: 15, max: 150, step: 5, def: 45, unit: " px" },
+      { key: "glow", label: "Luci: intensità", min: 10, max: 100, step: 5, def: 50, unit: "%" },
     ],
   },
   mappa: {
