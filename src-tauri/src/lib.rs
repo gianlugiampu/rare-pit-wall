@@ -320,23 +320,34 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         tracker.on_session_info(&yaml);
                         let team_ids = shared.team_ids.lock().unwrap().clone();
                         detector.on_session_info(&yaml, &team_ids, tracker.car_idx.max(0) as usize);
-                        // nuova sessione: stint da zero e domanda al sito se è una gara del calendario
-                        let key = format!("{subsession}-{num}");
-                        if key != live_key {
-                            live_key = key;
-                            tracker.reset();
-                            // P6: gara finita (cambio di sessione): si mandano i momenti; nuova gara: si riparte
-                            if detector.dirty {
-                                send_moments(&app, shared.clone(), detector.race.clone(), true);
-                            }
-                            if session == "Race" {
-                                detector.start_race(subsession.parse().unwrap_or(0), num, &track);
-                            }
-                            fetch_team(&app, shared.clone());
-                            *shared.live_event.lock().unwrap() = None;
-                            live_probe(&app, shared.clone(), subsession.parse().unwrap_or(0), session.clone());
-                        }
                         cur_yaml = yaml;
+                    }
+                    // nuova sessione (controllata a ogni lettura: iRacing può cambiare sessione qualche istante dopo aver
+                    // aggiornato i dati, e prima la gara poteva non essere «avviata»): stint da zero, momenti, calendario
+                    let num = s.get("SessionNum").map(|v| v.as_i32()).unwrap_or(0);
+                    let key = format!("{subsession}-{num}");
+                    if key != live_key && !subsession.is_empty() {
+                        live_key = key;
+                        session = irsdk::yaml_value(&cur_yaml, "SessionType", Some(&format!("SessionNum: {num}\n"))).unwrap_or_default();
+                        tracker.reset();
+                        let token = load_config(&app).token;
+                        // P6: gara finita (cambio di sessione): si mandano i momenti; nuova gara: si riparte
+                        if detector.race.subsession != 0 {
+                            site_log(token.clone(), format!("gara finita: {} momenti trovati", detector.race.moments.len()));
+                        }
+                        if detector.dirty {
+                            detector.dirty = false;
+                            send_moments(&app, shared.clone(), detector.race.clone(), true);
+                        }
+                        if session == "Race" {
+                            detector.start_race(subsession.parse().unwrap_or(0), num, &track);
+                            site_log(token, format!("gara iniziata: seguo {} auto del team · {track}", detector.team_count()));
+                        } else {
+                            detector.race.subsession = 0;
+                        }
+                        fetch_team(&app, shared.clone());
+                        *shared.live_event.lock().unwrap() = None;
+                        live_probe(&app, shared.clone(), subsession.parse().unwrap_or(0), session.clone());
                     }
                     // Classifica ufficiale della gara: si manda subito, una volta sola per gara
                     let key = format!("{subsession}-{session_num}");
@@ -512,10 +523,15 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                 // iRacing chiuso: si riapre la memoria al prossimo giro
                 sdk = None;
                 info_rev = -1;
+                if detector.race.subsession != 0 {
+                    site_log(load_config(&app).token, format!("iRacing chiuso durante/dopo la gara: {} momenti trovati", detector.race.moments.len()));
+                    detector.race.subsession = 0;
+                }
                 if detector.dirty {
                     detector.dirty = false;
                     send_moments(&app, shared.clone(), detector.race.clone(), true);
                 }
+                live_key.clear();
                 if let Some((key, yaml, num)) = pending.take() {
                     if sent.insert(key) {
                         send_results(&app, shared.clone(), yaml, num, false);

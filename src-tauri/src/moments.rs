@@ -99,6 +99,11 @@ impl Detector {
     }
 
     /// Nuova gara: si riparte da zero
+    /// Auto del team seguite (per il registro di diagnosi)
+    pub fn team_count(&self) -> usize {
+        self.team.len()
+    }
+
     pub fn start_race(&mut self, subsession: i64, session_num: i32, track: &str) {
         let (cars, team, my_idx) = (std::mem::take(&mut self.cars), std::mem::take(&mut self.team), self.my_idx);
         *self = Detector::default();
