@@ -1,4 +1,10 @@
-//! P8.6 · Mappa della pista costruita dai dati.
+//! P8.6 · Mappa della pista.
+//! **Prima scelta: i disegni ufficiali di iRacing** (pubblici su members-assets.iracing.com, scelta di Gianluca del 24/11/2026):
+//! l'indirizzo si compone con il numero e il nome interno della pista che iRacing dà al programma in ogni sessione
+//! (es. 523 «spa 2024 up» → tracks_spa/523-spa-2024-up/). Si scaricano il tracciato (active.svg) e il traguardo
+//! (start-finish.svg), si salvano sul PC e a ogni nuova sessione si controlla se sono cambiati.
+//! Traguardo e verso di percorrenza li ricava la pagina della Mappa (dal disegno del traguardo e dalla tua auto).
+//! **Riserva** (pista non trovata): il disegno costruito dai dati, qui sotto.
 //! iRacing non dà la forma della pista: la si ricava dal **primo giro pulito** della tua auto, sommando passo dopo passo
 //! velocità (VelocityX/Y, in m/s nel riferimento dell'auto) e direzione (Yaw) 60 volte al secondo. A fine giro il piccolo
 //! errore accumulato si distribuisce lungo il giro (il disegno si chiude da solo) e i punti si salvano sul PC, uno ogni
@@ -13,7 +19,37 @@ pub const N: usize = 400;
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct TrackMap {
     pub key: String,
+    /// disegno dal giro (riserva); vuoto se c'è il disegno di iRacing
+    #[serde(default)]
     pub points: Vec<[f32; 2]>,
+    #[serde(default)]
+    pub svg: Option<SvgMap>,
+}
+
+/// Disegno ufficiale di iRacing
+#[derive(Serialize, Deserialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SvgMap {
+    pub base: String,
+    pub active: String,
+    pub finish: String,
+    #[serde(default)]
+    pub etag: Option<String>,
+    /// verso di percorrenza ricavato dalla tua auto (None = non ancora capito)
+    #[serde(default)]
+    pub reversed: Option<bool>,
+}
+
+const ASSETS: &str = "https://members-assets.iracing.com/public/track-maps";
+
+/// Indirizzo dei disegni di iRacing: numero e nome interno della pista (WeekendInfo → TrackID, TrackName)
+pub fn iracing_base(track_id: &str, track_name: &str) -> Option<String> {
+    let name = track_name.trim().to_lowercase();
+    let first = name.split_whitespace().next()?;
+    if track_id.trim().is_empty() {
+        return None;
+    }
+    Some(format!("{ASSETS}/tracks_{first}/{}-{}/", track_id.trim(), name.split_whitespace().collect::<Vec<_>>().join("-")))
 }
 
 /// Dati di un istante della tua auto
@@ -112,13 +148,19 @@ fn path(dir: &PathBuf, key: &str) -> PathBuf {
     dir.join(format!("{safe}.json"))
 }
 
+fn read(p: PathBuf) -> Option<TrackMap> {
+    std::fs::read_to_string(p).ok().and_then(|s| serde_json::from_str(&s).ok())
+}
+
+/// Mappa salvata sul PC: prima il disegno di iRacing, poi quello dal giro
 pub fn load(dir: &PathBuf, key: &str) -> Option<TrackMap> {
-    std::fs::read_to_string(path(dir, key)).ok().and_then(|s| serde_json::from_str(&s).ok())
+    read(path(dir, &format!("{key}-iracing"))).or_else(|| read(path(dir, key)))
 }
 
 pub fn save(dir: &PathBuf, m: &TrackMap) {
     let _ = std::fs::create_dir_all(dir);
-    let _ = std::fs::write(path(dir, &m.key), serde_json::to_string(m).unwrap_or_default());
+    let name = if m.svg.is_some() { format!("{}-iracing", m.key) } else { m.key.clone() };
+    let _ = std::fs::write(path(dir, &name), serde_json::to_string(m).unwrap_or_default());
 }
 
 #[cfg(test)]
@@ -149,6 +191,12 @@ mod tests {
             let d = ((p[0] - cx).powi(2) + (p[1] - cy).powi(2)).sqrt();
             assert!((d - 100.0).abs() < 3.0, "raggio {d}");
         }
+    }
+    #[test]
+    fn indirizzo_iracing() {
+        assert_eq!(iracing_base("523", "spa 2024 up").as_deref(), Some("https://members-assets.iracing.com/public/track-maps/tracks_spa/523-spa-2024-up/"));
+        assert_eq!(iracing_base("239", "monza full").as_deref(), Some("https://members-assets.iracing.com/public/track-maps/tracks_monza/239-monza-full/"));
+        assert_eq!(iracing_base("", "monza full"), None);
     }
     #[test]
     fn giro_sporco_non_conta() {

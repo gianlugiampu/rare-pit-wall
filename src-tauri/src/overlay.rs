@@ -345,6 +345,8 @@ struct Fast {
     car_lr: i32,
     /// P8.5: auto inquadrata dalla telecamera di iRacing (le grafiche per la diretta seguono lei)
     cam: i32,
+    /// P8.6: direzione dell'auto (per capire il verso del disegno di iRacing)
+    yaw: f32,
 }
 
 /// Dati lenti (4 volte al secondo): giri, tempi, benzina, sessione
@@ -550,6 +552,7 @@ fn start_reader(app: AppHandle) {
         let mut tick: u32 = 0;
         // P8.6: mappa della pista (si disegna dal primo giro pulito e si salva sul PC)
         let map_dir = app.path().app_local_data_dir().unwrap_or_else(|_| std::env::temp_dir()).join("mappe");
+        *MAP_DIR.lock().unwrap() = Some(map_dir.clone());
         let mut map_key = String::new();
         let mut recorder = crate::trackmap::Recorder::default();
         loop {
@@ -580,6 +583,7 @@ fn start_reader(app: AppHandle) {
                     fast.delta_best = ok(s, "LapDeltaToBestLap_OK").then(|| f(s, "LapDeltaToBestLap"));
                     fast.delta_session = ok(s, "LapDeltaToSessionBestLap_OK").then(|| f(s, "LapDeltaToSessionBestLap"));
                     fast.delta_last = ok(s, "LapDeltaToSessionLastlLap_OK").then(|| f(s, "LapDeltaToSessionLastlLap"));
+                    fast.yaw = f(s, "Yaw");
                     fast.car_lr = s.get("CarLeftRight").map(|v| v.as_i32()).unwrap_or(0);
                     fast.cam = s.get("CamCarIdx").map(|v| v.as_i32()).unwrap_or(-1);
                     // P8.6: con la Mappa aperta e la pista non ancora disegnata, si registra il giro
@@ -593,7 +597,7 @@ fn start_reader(app: AppHandle) {
                             clean: game.on_track && !ok(s, "OnPitRoad") && s.get("PlayerTrackSurface").map(|v| v.as_i32()).unwrap_or(-1) == 3,
                         };
                         if let Some(points) = recorder.step(&sample) {
-                            let m = crate::trackmap::TrackMap { key: map_key.clone(), points };
+                            let m = crate::trackmap::TrackMap { key: map_key.clone(), points, svg: None };
                             crate::trackmap::save(&map_dir, &m);
                             *MAP.lock().unwrap() = Some(m);
                             bump_map();
@@ -629,9 +633,12 @@ fn start_reader(app: AppHandle) {
                             *MAP.lock().unwrap() = local;
                             bump_map();
                             recorder.reset();
-                            if missing {
-                                let id = irsdk::yaml_value(&yaml, "TrackID", None).unwrap_or_default();
-                                fetch_site_map(&app, map_dir.clone(), key, id);
+                            let _ = missing;
+                            // disegni ufficiali di iRacing: si scaricano (o si controlla se sono cambiati)
+                            let id = irsdk::yaml_value(&yaml, "TrackID", None).unwrap_or_default();
+                            let name = irsdk::yaml_value(&yaml, "TrackName", None).unwrap_or_default();
+                            if let Some(base) = crate::trackmap::iracing_base(&id, &name) {
+                                fetch_iracing_map(map_dir.clone(), key, base);
                             }
                         }
                         if num != session_num {
@@ -920,29 +927,56 @@ fn bump_map() {
     MAP_REV.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Forma della pista dal sito: dai giri del team importati da Garage61 (coordinate GPS, più precisa del disegno dal giro)
-fn fetch_site_map(app: &AppHandle, dir: std::path::PathBuf, key: String, track_id: String) {
-    let Some(token) = crate::load_config(app).token else { return };
+/// Disegni ufficiali di iRacing: si scaricano la prima volta e poi si controlla (con l'ETag) se sono cambiati.
+/// Se la pista non si trova, resta la riserva: il disegno dal primo giro pulito.
+fn fetch_iracing_map(dir: std::path::PathBuf, key: String, base: String) {
     tauri::async_runtime::spawn(async move {
-        let res = crate::http().get(format!("{}/api/pitwall/trackmap?track={track_id}", crate::SITE)).bearer_auth(token).send().await;
-        let Ok(r) = res else { return };
-        if !r.status().is_success() {
+        let saved = crate::trackmap::load(&dir, &key).and_then(|m| m.svg).filter(|s| s.base == base);
+        let mut req = crate::http().get(format!("{base}active.svg"));
+        if let Some(tag) = saved.as_ref().and_then(|s| s.etag.clone()) {
+            req = req.header("If-None-Match", tag);
+        }
+        let Ok(r) = req.send().await else { return };
+        if r.status() == reqwest::StatusCode::NOT_MODIFIED || !r.status().is_success() {
+            return; // uguale a quello salvato, oppure pista non trovata
+        }
+        let etag = r.headers().get("etag").and_then(|v| v.to_str().ok()).map(String::from);
+        let Ok(active) = r.text().await else { return };
+        if !active.contains("<svg") {
             return;
         }
-        let Ok(m) = r.json::<crate::trackmap::TrackMap>().await else { return };
-        if m.points.len() < 50 {
-            return;
-        }
-        let m = crate::trackmap::TrackMap { key: key.clone(), points: m.points };
-        let mut cur = MAP.lock().unwrap();
-        // solo se si è ancora su quella pista e non è già stata disegnata dal giro
-        if cur.is_none() && STATE_TRACK.lock().unwrap().as_str() == key {
-            crate::trackmap::save(&dir, &m);
-            *cur = Some(m);
-            drop(cur);
+        let finish = match crate::http().get(format!("{base}start-finish.svg")).send().await {
+            Ok(r) if r.status().is_success() => r.text().await.unwrap_or_default(),
+            _ => String::new(),
+        };
+        // il verso già capito resta valido se il disegno è della stessa pista
+        let reversed = saved.and_then(|s| s.reversed);
+        let m = crate::trackmap::TrackMap {
+            key: key.clone(),
+            points: vec![],
+            svg: Some(crate::trackmap::SvgMap { base, active, finish, etag, reversed }),
+        };
+        crate::trackmap::save(&dir, &m);
+        if STATE_TRACK.lock().unwrap().as_str() == key {
+            *MAP.lock().unwrap() = Some(m);
             bump_map();
         }
     });
+}
+static MAP_DIR: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
+
+/// P8.6 · la pagina della Mappa ha capito il verso di percorrenza del disegno di iRacing: si salva per quella pista
+#[tauri::command]
+pub fn overlay_map_dir(reversed: bool) {
+    let mut cur = MAP.lock().unwrap();
+    if let Some(m) = cur.as_mut() {
+        if let Some(svg) = m.svg.as_mut() {
+            svg.reversed = Some(reversed);
+            if let Some(dir) = MAP_DIR.lock().unwrap().as_ref() {
+                crate::trackmap::save(dir, m);
+            }
+        }
+    }
 }
 static STATE_TRACK: Mutex<String> = Mutex::new(String::new());
 

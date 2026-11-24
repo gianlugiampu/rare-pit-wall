@@ -275,10 +275,125 @@ export function demoCars(t: number): Car[] {
 }
 
 // ——— Mappa della pista (P8.6) ———
-export type TrackMap = { key: string; points: [number, number][] };
+export type TrackMap = {
+  key: string;
+  points: [number, number][];
+  /** disegno ufficiale di iRacing (prima scelta) */
+  svg?: { active: string; finish: string; reversed: boolean | null } | null;
+};
 let trackMap: TrackMap | null = null;
+/** con il disegno di iRacing: i punti nei due versi di percorrenza (dal traguardo) */
+let svgDirs: { fwd: [number, number][]; rev: [number, number][] } | null = null;
+let mapVersion = 0;
+
+/** Punti del disegno di iRacing: tracciato misurato con il browser, partenza dal traguardo, y verso l'alto */
+function svgToDirs(active: string, finish: string): { fwd: [number, number][]; rev: [number, number][] } | null {
+  const mount = (text: string) => {
+    const host = document.createElement("div");
+    host.style.cssText = "position:absolute;left:-99999px;top:0;width:1920px;height:1080px;visibility:hidden;pointer-events:none";
+    host.innerHTML = text.replace(/<\?xml[^>]*>/, "");
+    document.body.append(host);
+    return host;
+  };
+  const shapes = (host: HTMLElement) =>
+    [...host.querySelectorAll("path,polyline,polygon,line,rect,circle,ellipse")].filter((e) => !e.closest("defs")) as SVGGeometryElement[];
+  const a = mount(active), f = mount(finish || "<svg></svg>");
+  try {
+    // il tracciato è la forma più lunga del disegno
+    let line: SVGGeometryElement | null = null, L = 0;
+    for (const e of shapes(a)) {
+      const l = e.getTotalLength?.() ?? 0;
+      if (l > L) { L = l; line = e; }
+    }
+    if (!line || L < 50) return null;
+    const ctm = line.getCTM();
+    const at = (l: number): [number, number] => {
+      let p = line!.getPointAtLength(((l % L) + L) % L);
+      if (ctm) p = p.matrixTransform(ctm);
+      return [p.x, p.y];
+    };
+    // traguardo: il centro del disegno della linea, e il punto del tracciato più vicino
+    let off = 0;
+    const fin = shapes(f)[0];
+    if (fin) {
+      const b = fin.getBBox(), m = fin.getCTM();
+      let c = new DOMPoint(b.x + b.width / 2, b.y + b.height / 2);
+      if (m) c = c.matrixTransform(m);
+      let best = Infinity;
+      for (let k = 0; k < 2000; k++) {
+        const [x, y] = at((k / 2000) * L);
+        const d = (x - c.x) ** 2 + (y - c.y) ** 2;
+        if (d < best) { best = d; off = (k / 2000) * L; }
+      }
+    }
+    const N = 400;
+    const pts = (dir: number) => Array.from({ length: N }, (_, k) => { const [x, y] = at(off + dir * (k / N) * L); return [x, -y] as [number, number]; });
+    return { fwd: pts(1), rev: pts(-1) };
+  } finally {
+    a.remove();
+    f.remove();
+  }
+}
+
 export function setMap(m: TrackMap | null) {
+  svgDirs = null;
+  dirTrack = null;
+  if (m?.svg?.active) {
+    svgDirs = svgToDirs(m.svg.active, m.svg.finish);
+    if (svgDirs) m = { ...m, points: m.svg.reversed ? svgDirs.rev : svgDirs.fwd };
+  }
   trackMap = m && m.points?.length > 10 ? m : null;
+  mapVersion++;
+}
+
+// ——— Verso di percorrenza del disegno di iRacing: si capisce dalla tua auto ———
+// Mentre guidi si somma di quanto gira l'auto (Yaw) in un tratto con curve; si confronta con quanto gira il disegno nello
+// stesso tratto nei due versi: vince il verso che somiglia di più. Si decide una volta e si salva per quella pista.
+let dirTrack: { p0: number; last: number; lastPct: number; turn: number } | null = null;
+const turning = (pts: [number, number][], from: number, span: number) => {
+  const n = pts.length, i0 = Math.floor(from * n), steps = Math.max(2, Math.floor(span * n));
+  let t = 0, prev: number | null = null;
+  for (let k = 0; k < steps; k++) {
+    const a = pts[(i0 + k) % n], b = pts[(i0 + k + 1) % n];
+    const ang = Math.atan2(b[1] - a[1], b[0] - a[0]);
+    if (prev != null) { let d = ang - prev; while (d > Math.PI) d -= 2 * Math.PI; while (d < -Math.PI) d += 2 * Math.PI; t += d; }
+    prev = ang;
+  }
+  return t;
+};
+function learnDirection(pct: number, yaw: number, onTrack: boolean, setting: string) {
+  if (!trackMap?.svg || !svgDirs) return;
+  // scelta a mano nelle impostazioni
+  if (setting === "normale" || setting === "invertito") {
+    const want = setting === "invertito" ? svgDirs.rev : svgDirs.fwd;
+    if (trackMap.points !== want) { trackMap = { ...trackMap, points: want }; mapVersion++; }
+    return;
+  }
+  if (trackMap.svg.reversed != null) return;
+  if (!onTrack) { dirTrack = null; return; }
+  if (!dirTrack) { dirTrack = { p0: pct, last: yaw, lastPct: pct, turn: 0 }; return; }
+  let span = pct - dirTrack.p0;
+  if (span < 0) span += 1;
+  const back = pct < dirTrack.lastPct - 0.01 && !(dirTrack.lastPct > 0.9 && pct < 0.1);
+  if (back || span > 0.5) { dirTrack = null; return; }
+  let dy = yaw - dirTrack.last;
+  while (dy > Math.PI) dy -= 2 * Math.PI;
+  while (dy < -Math.PI) dy += 2 * Math.PI;
+  dirTrack.turn += dy;
+  dirTrack.last = yaw;
+  dirTrack.lastPct = pct;
+  if (Math.abs(dirTrack.turn) < 1.2 || span < 0.02) return;
+  // confronto nei due versi (anche con il segno opposto, per non dipendere da come iRacing misura lo Yaw)
+  const score = (pts: [number, number][]) => { const t = turning(pts, dirTrack!.p0, span); return Math.min(Math.abs(t - dirTrack!.turn), Math.abs(t + dirTrack!.turn)); };
+  const rev = score(svgDirs.rev) < score(svgDirs.fwd);
+  trackMap = { ...trackMap, points: rev ? svgDirs.rev : svgDirs.fwd, svg: { ...trackMap.svg, reversed: rev } };
+  mapVersion++;
+  dirTrack = null;
+  onDirection?.(rev);
+}
+let onDirection: ((rev: boolean) => void) | null = null;
+export function onMapDirection(cb: (rev: boolean) => void) {
+  onDirection = cb;
 }
 
 /** Disegno di esempio (anteprima e «sposta» senza mappa) */
@@ -291,7 +406,7 @@ export function demoMap(): TrackMap {
   return { key: "demo", points };
 }
 
-export type MapInfo = { me: number; progress: number | null };
+export type MapInfo = { me: number; progress: number | null; pct: number; yaw: number; onTrack: boolean };
 
 export function buildMappa(it: Item): { el: HTMLElement; update: (cars: Car[] | null, info: MapInfo) => void } {
   const o = (k: string) => opt(it, "mappa", k);
@@ -351,6 +466,7 @@ export function buildMappa(it: Item): { el: HTMLElement; update: (cars: Car[] | 
   return {
     el,
     update(cars, info) {
+      learnDirection(info.pct, info.yaw, info.onTrack, String(o("direction")));
       const m = trackMap;
       svg.style.display = m ? "" : "none";
       msg.style.display = m ? "none" : "";
@@ -360,8 +476,8 @@ export function buildMappa(it: Item): { el: HTMLElement; update: (cars: Car[] | 
           : "La mappa si disegna da sola al tuo primo giro pulito (anche in prova): esci dai box e fai un giro completo.";
         return;
       }
-      if (m.key !== drawnKey) {
-        drawnKey = m.key;
+      if (`${m.key}#${mapVersion}` !== drawnKey) {
+        drawnKey = `${m.key}#${mapVersion}`;
         dots.clear();
         draw(m);
       }

@@ -85,9 +85,10 @@ export const DEFS: Record<string, Def> = {
   },
   mappa: {
     name: "Mappa",
-    desc: "Il tracciato con le auto come pallini. Si disegna da sola al tuo primo giro pulito su ogni pista e resta salvata sul PC.",
+    desc: "Il tracciato con le auto come pallini, dal disegno ufficiale di iRacing (scaricato e aggiornato da solo). Se una pista non si trova, si disegna dal tuo primo giro pulito.",
     fields: [{ key: "finish", label: "Linea del traguardo", def: true }],
     choices: [
+      { key: "direction", label: "Verso di percorrenza", options: [["auto", "Lo capisce da solo"], ["normale", "Normale"], ["invertito", "Invertito"]], def: "auto" },
       { key: "label", label: "Nel pallino", options: [["pos", "La posizione"], ["num", "Il numero di gara"]], def: "pos" },
       { key: "cars", label: "Auto", options: [["all", "Tutte"], ["mine", "Solo la tua classe"]], def: "all" },
       { key: "rotate", label: "Ruota", options: [["0", "No"], ["90", "90°"], ["180", "180°"], ["270", "270°"]], def: "0" },

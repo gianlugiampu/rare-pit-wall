@@ -5,12 +5,12 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { DEFS, item, opt, type Config, type Item } from "./overlay-defs";
-import { buildClassifica, buildMappa, buildRelative, demoCars, demoDrivers, demoMap, setDrivers, setMap, type Car, type CarView, type Drivers, type TrackMap } from "./overlay-cars";
+import { buildClassifica, buildMappa, buildRelative, demoCars, demoDrivers, demoMap, onMapDirection, setDrivers, setMap, type Car, type CarView, type Drivers, type TrackMap } from "./overlay-cars";
 
 type Fast = {
   connected: boolean; onTrack: boolean; throttle: number; brake: number; clutch: number; steer: number; steerMax: number;
   gear: number; speedKmh: number; rpm: number; lapPct: number; lapCur: number;
-  deltaBest: number | null; deltaSession: number | null; deltaLast: number | null; carLr: number;
+  deltaBest: number | null; deltaSession: number | null; deltaLast: number | null; carLr: number; yaw: number;
 };
 type Slow = {
   session: string; lap: number; lapsRemain: number | null; timeRemain: number | null;
@@ -361,7 +361,10 @@ const BUILDERS: Record<string, (it: Item) => View> = {
   radar: buildRadar, box: buildBox,
   mappa: (it) => {
     const v = buildMappa(it);
-    return { el: v.el, update: (_f, s, cars) => v.update(cars ?? null, { me: (s ?? lastSlow)?.me ?? -1, progress: (s ?? lastSlow)?.mapProgress ?? null }) };
+    return {
+      el: v.el,
+      update: (f, s, cars) => v.update(cars ?? null, { me: (s ?? lastSlow)?.me ?? -1, progress: (s ?? lastSlow)?.mapProgress ?? null, pct: f.lapPct, yaw: f.yaw, onTrack: f.onTrack && live }),
+    };
   },
 };
 
@@ -375,7 +378,7 @@ function demo(t: number): Frame {
     fast: {
       connected: true, onTrack: true, throttle: thr, brake: brk, clutch: 0, steer: Math.sin(t / 900) * 1.2, steerMax: 4,
       gear: ph < 0.55 ? 5 : 3, speedKmh: ph < 0.55 ? 212 : 128, rpm: 7000, lapPct: (t / 90000) % 1, lapCur: (t / 1000) % 105,
-      deltaBest: d, deltaSession: d + 0.4, deltaLast: d - 0.1, carLr: [1, 2, 1, 4, 1, 6][Math.floor(t / 1500) % 6],
+      deltaBest: d, deltaSession: d + 0.4, deltaLast: d - 0.1, carLr: [1, 2, 1, 4, 1, 6][Math.floor(t / 1500) % 6], yaw: 0,
     },
     slow: {
       session: "Race", lap: 14, lapsRemain: 6, timeRemain: 640, lastLap: 105.6, bestLap: 105.39, sessionBest: 105.21,
@@ -464,6 +467,8 @@ async function start() {
     id = hello.id;
     side = hello.side;
     await listen<{ author: string; text: string }>("ov-box", (e) => (boxMsg = { ...e.payload, at: Date.now() }));
+    // P8.6: verso del disegno di iRacing capito dalla tua auto → si salva per quella pista
+    onMapDirection((reversed) => invoke("overlay_map_dir", { reversed }));
     cfg = hello.config;
     await listen<Config>("ov-config", (e) => {
       cfg = e.payload;
