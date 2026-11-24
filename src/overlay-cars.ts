@@ -501,6 +501,29 @@ export function buildMappa(it: Item): { el: HTMLElement; update: (cars: Car[] | 
     return tf([m.points[i][0] + (m.points[j][0] - m.points[i][0]) * t, m.points[i][1] + (m.points[j][1] - m.points[i][1]) * t]);
   };
   const dots = new Map<number, SVGGElement>();
+  // movimento fluido: per ogni auto ultima posizione nota (% del giro), quando, e velocità stimata (% al ms)
+  const motion = new Map<number, { pct: number; t: number; v: number }>();
+  let myId = -1, myPct = -1, myT = 0;
+  let curMap: TrackMap | null = null;
+  const frame = () => {
+    const m = curMap;
+    if (m && el.isConnected) {
+      const now = performance.now();
+      for (const [i, g] of dots) {
+        let pct: number;
+        if (i === myId && myPct >= 0 && now - myT < 500) pct = myPct; // la tua auto: dati a 60 Hz
+        else {
+          const s = motion.get(i);
+          if (!s) continue;
+          pct = s.pct + s.v * Math.min(now - s.t, 400); // stima fino a 0,4 s avanti
+        }
+        const [x, y] = at(m, pct);
+        g.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+      }
+    }
+    if (el.isConnected) requestAnimationFrame(frame); // si ferma quando l'overlay viene ridisegnato
+  };
+  requestAnimationFrame(frame);
 
   return {
     el,
@@ -518,9 +541,30 @@ export function buildMappa(it: Item): { el: HTMLElement; update: (cars: Car[] | 
       if (`${m.key}#${mapVersion}` !== drawnKey) {
         drawnKey = `${m.key}#${mapVersion}`;
         dots.clear();
+        motion.clear();
         draw(m);
       }
+      curMap = m;
+      myId = info.me;
+      if (info.onTrack) {
+        myPct = info.pct;
+        myT = performance.now();
+      }
       if (!cars) return;
+      // nuove posizioni: velocità stimata dalla differenza con la precedente (gestendo il passaggio sul traguardo)
+      const now = performance.now();
+      for (const c of cars) {
+        const prev = motion.get(c.i);
+        if (!prev) {
+          motion.set(c.i, { pct: c.pct, t: now, v: 0 });
+          continue;
+        }
+        let d = c.pct - prev.pct;
+        if (d < -0.5) d += 1;
+        const dt = now - prev.t;
+        const v = d >= 0 && d < 0.05 && dt > 0 ? prev.v * 0.5 + (d / dt) * 0.5 : 0;
+        motion.set(c.i, { pct: c.pct, t: now, v });
+      }
       const me = cars.find((c) => c.i === info.me);
       const myProg = me ? me.lap + me.pct : 0;
       const myClass = drivers.get(info.me)?.classId;
@@ -543,8 +587,6 @@ export function buildMappa(it: Item): { el: HTMLElement; update: (cars: Car[] | 
         const lapped = me && !isMe && myProg - (c.lap + c.pct) > 0.5;
         g.setAttribute("class", `car${isMe ? " me" : d?.rare ? " rare" : lapped ? " lapped" : ""}`);
         (g.lastElementChild as SVGTextElement).textContent = o("label") === "num" ? d?.number ?? "" : String(c.cpos || c.pos || "");
-        const [x, y] = at(m, c.pct);
-        g.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
       }
       for (const [i, g] of dots) if (!seen.has(i)) { g.remove(); dots.delete(i); }
     },

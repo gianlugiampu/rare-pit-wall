@@ -257,20 +257,19 @@ function buildPedali(it: Item): View {
   if (o("trace")) el.append(svg);
   const bars = document.createElement("div");
   bars.className = "bars";
+  // ogni barra con, sotto, la sua percentuale (facoltativa)
   const bar = (c: string) => {
-    const b = document.createElement("span");
-    b.innerHTML = `<i style="background:${c}"></i>`;
-    return b;
+    const col = document.createElement("div");
+    col.className = "pcol";
+    col.innerHTML = `<span><i style="background:${c}"></i></span><small class="tab" style="color:${c}">0</small>`;
+    return col;
   };
   const cB = bar("var(--ink-400)"), bB = bar("var(--lap-invalid)"), tB = bar("var(--lap-pb)");
   if (o("clutch")) bars.append(cB);
   bars.append(bB, tB);
-  if (o("bars")) el.append(bars);
-  // percentuali (facoltative): gas, freno e, se la frizione è accesa, frizione
-  const pcts = document.createElement("div");
-  pcts.className = "pcts tab";
-  pcts.innerHTML = `<span class="pb">G <b>0</b></span><span class="bad">F <b>0</b></span>${o("clutch") ? `<span class="muted">C <b>0</b></span>` : ""}`;
-  if (o("pct")) el.append(pcts);
+  if (!o("pct")) bars.classList.add("nopct");
+  if (o("bars") || o("pct")) el.append(bars);
+  if (!o("bars")) bars.classList.add("nobar");
   const gear = document.createElement("div");
   gear.className = "gear";
   gear.innerHTML = `<b class="d">N</b><b>0</b>`;
@@ -293,13 +292,10 @@ function buildPedali(it: Item): View {
       brakeL.setAttribute("points", pts(hist.b, pedal));
       if (o("clutch")) clutchL.setAttribute("points", pts(hist.c, pedal));
       if (o("steer")) steerL.setAttribute("points", pts(hist.s, (v) => 30 - v * 26));
-      (tB.firstElementChild as HTMLElement).style.height = `${f.throttle * 100}%`;
-      (bB.firstElementChild as HTMLElement).style.height = `${f.brake * 100}%`;
-      (cB.firstElementChild as HTMLElement).style.height = `${f.clutch * 100}%`;
-      const nums = pcts.querySelectorAll("b");
-      nums[0].textContent = String(Math.round(f.throttle * 100));
-      nums[1].textContent = String(Math.round(f.brake * 100));
-      if (nums[2]) nums[2].textContent = String(Math.round(f.clutch * 100));
+      for (const [col, v] of [[tB, f.throttle], [bB, f.brake], [cB, f.clutch]] as [HTMLElement, number][]) {
+        (col.querySelector("i") as HTMLElement).style.height = `${v * 100}%`;
+        (col.querySelector("small") as HTMLElement).textContent = String(Math.round(v * 100));
+      }
       (gear.firstElementChild as HTMLElement).textContent = !f.connected ? dash : f.gear === -1 ? "R" : f.gear === 0 ? "N" : String(f.gear);
       (gear.lastElementChild as HTMLElement).textContent = f.connected ? String(Math.round(f.speedKmh)) : dash;
     },
