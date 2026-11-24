@@ -95,6 +95,41 @@ function sof(list: Driver[]): number {
   return Math.round(k * Math.log(irs.length / irs.reduce((a, x) => a + Math.exp(-x / k), 0)));
 }
 
+/**
+ * Stima di quanto iRating si guadagna o si perde con le posizioni attuali (gara), dentro la classe.
+ * Formula usata dai calcolatori della community (iRacing la comunica davvero solo a fine gara): probabilità di stare
+ * davanti a ogni avversario dagli iRating, confronto con la posizione, correzione «fudge», ×200 / numero di auto.
+ */
+export function irChanges(list: { i: number; ir: number; pos: number }[]): Map<number, number> {
+  const out = new Map<number, number>();
+  const n = list.length;
+  if (n < 2) return out;
+  const k = 1600 / Math.LN2;
+  const chance = (a: number, b: number) => {
+    const ea = Math.exp(-a / k), eb = Math.exp(-b / k);
+    return ((1 - ea) * eb) / ((1 - eb) * ea + (1 - ea) * eb);
+  };
+  for (const me of list) {
+    if (!(me.ir > 0) || !(me.pos > 0)) continue;
+    let expected = -0.5;
+    for (const o of list) expected += chance(me.ir, o.ir > 0 ? o.ir : 1350);
+    const fudge = (n / 2 - me.pos) / 100;
+    out.set(me.i, Math.round(((n - me.pos - expected - fudge) * 200) / n));
+  }
+  return out;
+}
+const irText = (v: number | undefined) => (v == null ? "" : v > 0 ? `+${v}` : v < 0 ? `−${Math.abs(v)}` : "0");
+const irCls = (v: number | undefined) => (v == null || v === 0 ? "muted" : v > 0 ? "pb" : "bad");
+/** stima per tutte le auto della classe di `ref`, solo in gara */
+function irFor(cars: Car[], s: SessionInfo, ref: number): Map<number, number> {
+  if (s.session !== "Race") return new Map();
+  const cls = drivers.get(ref)?.classId;
+  const list = cars
+    .filter((c) => drivers.has(c.i) && (cls == null || drivers.get(c.i)!.classId === cls))
+    .map((c) => ({ i: c.i, ir: drivers.get(c.i)!.irating, pos: c.cpos }));
+  return irChanges(list);
+}
+
 export type CarView = { el: HTMLElement; update: (cars: Car[] | null, s: SessionInfo | null) => void };
 
 // ——— Relative ———
@@ -133,6 +168,7 @@ export function buildRelative(it: Item): CarView {
       const ahead = others.filter((x) => x.dt > 0).sort((a, b) => a.dt - b.dt).slice(0, n).reverse();
       const behind = others.filter((x) => x.dt <= 0).sort((a, b) => b.dt - a.dt).slice(0, n);
       const rows = [...ahead, { c: me, dt: 0, tone: "me" }, ...behind];
+      const ird = o("irDelta") ? irFor(cars, s, s.me) : new Map<number, number>();
       body.innerHTML = rows
         .map(({ c, dt, tone }) => {
           const d = drivers.get(c.i);
@@ -144,9 +180,10 @@ export function buildRelative(it: Item): CarView {
             ${posPill(c.cpos || c.pos)}
             <span class="num d">${esc(d?.number ?? "")}</span>
             <span class="name ${nameCls}">${esc(d?.name ?? "")}</span>${extra}
-            ${c.pit ? `<span class="pit">PIT</span>` : ""}
+            <span class="pit-slot">${c.pit ? `<span class="pit">PIT</span>` : ""}</span>
             ${o("lic") ? licChip(d) : ""}
             ${o("last") ? `<span class="t-last">${lapTime(c.last)}</span>` : ""}
+            ${o("irDelta") ? `<span class="ird ${irCls(ird.get(c.i))}">${irText(ird.get(c.i))}</span>` : ""}
             <span class="gap${isMe ? " mine" : ""}">${isMe ? "0.0" : `${dt > 0 ? "-" : "+"}${gapText(dt)}`}</span>
           </div>`;
         })
@@ -170,8 +207,8 @@ export function buildClassifica(it: Item): CarView {
   const around = Number(o("around")) || 3;
   const all = o("rows") === "all";
   cols.innerHTML = `${o("classColor") ? `<span class="cls"></span>` : ""}<span class="pill-w"></span>${o("chg") ? `<span class="chg"></span>` : ""}<span class="num"></span>
-    <span class="name">Pilota</span>${o("lic") ? `<span class="lic-h">Patente</span>` : ""}${o("pits") ? `<span class="pits">Box</span>` : ""}
-    <span class="gap">Distacco</span>${o("interval") ? `<span class="gap">Interv.</span>` : ""}${o("last") ? `<span class="t-last">Ultimo</span>` : ""}${o("best") ? `<span class="t-best">Migliore</span>` : ""}`;
+    <span class="name">Pilota</span>${o("lic") ? `<span class="lic-h">Patente</span>` : ""}<span class="pit-slot"></span>${o("pits") ? `<span class="pits">Box</span>` : ""}
+    <span class="gap">Distacco</span>${o("interval") ? `<span class="gap">Interv.</span>` : ""}${o("last") ? `<span class="t-last">Ultimo</span>` : ""}${o("best") ? `<span class="t-best">Migliore</span>` : ""}${o("irDelta") ? `<span class="ird">iR</span>` : ""}`;
   return {
     el,
     update(cars, s) {
@@ -187,6 +224,7 @@ export function buildClassifica(it: Item): CarView {
       const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
       h.right.textContent = s.lapsTotal ? `giro ${Math.max(s.lap, 0)} / ${s.lapsTotal} · ${hhmm}` : hhmm;
       const leader = mine[0];
+      const ird = o("irDelta") ? irFor(cars, s, s.me) : new Map<number, number>();
       const fastest = Math.min(...mine.map((c) => (c.best > 0 ? c.best : Infinity)));
       const gapTo = (c: Car, ref: Car | undefined): string => {
         if (!ref || c === ref) return c === leader ? (race ? "Leader" : lapTime(c.best)) : dash;
@@ -229,13 +267,14 @@ export function buildClassifica(it: Item): CarView {
             ${o("chg") ? `<span class="chg ${chg > 0 ? "pb" : "bad"}">${chg ? `${chg > 0 ? "▲" : "▼"}${Math.abs(chg)}` : ""}</span>` : ""}
             <span class="num d">${esc(d?.number ?? "")}</span>
             <span class="name ${isMe ? "me" : d?.rare ? "rare" : ""}">${esc(d?.name ?? "")}</span>
-            ${c.pit ? `<span class="pit">PIT</span>` : ""}
+            <span class="pit-slot">${c.pit ? `<span class="pit">PIT</span>` : ""}</span>
             ${o("lic") ? licChip(d) : ""}
             ${o("pits") ? `<span class="pits">${pits.get(c.i) ?? 0}</span>` : ""}
             <span class="gap">${gapTo(c, leader)}</span>
             ${o("interval") ? `<span class="gap">${k > 0 ? gapTo(c, mine[k - 1]) : dash}</span>` : ""}
             ${o("last") ? `<span class="t-last">${lapTime(c.last)}</span>` : ""}
             ${o("best") ? `<span class="t-best ${bestCls}">${lapTime(c.best)}</span>` : ""}
+            ${o("irDelta") ? `<span class="ird ${irCls(ird.get(c.i))}">${irText(ird.get(c.i))}</span>` : ""}
           </div>`;
         })
         .join("");
