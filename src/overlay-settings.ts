@@ -53,7 +53,7 @@ const IN_APP = "__TAURI_INTERNALS__" in window;
 
 // Prossimi overlay (fase P8.6): in elenco, ma non ancora attivabili
 const SOON: [string, string][] = [
-  ["Mappa", "P8.6"],
+
 ];
 
 let st: State = {

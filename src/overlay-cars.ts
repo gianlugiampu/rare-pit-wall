@@ -273,3 +273,125 @@ export function demoCars(t: number): Car[] {
     };
   });
 }
+
+// ——— Mappa della pista (P8.6) ———
+export type TrackMap = { key: string; points: [number, number][] };
+let trackMap: TrackMap | null = null;
+export function setMap(m: TrackMap | null) {
+  trackMap = m && m.points?.length > 10 ? m : null;
+}
+
+/** Disegno di esempio (anteprima e «sposta» senza mappa) */
+export function demoMap(): TrackMap {
+  const points: [number, number][] = [];
+  for (let k = 0; k < 400; k++) {
+    const a = (k / 400) * Math.PI * 2;
+    points.push([Math.cos(a) * 300 + Math.cos(a * 2) * 70, Math.sin(a) * 160 + Math.sin(a * 3) * 45]);
+  }
+  return { key: "demo", points };
+}
+
+export type MapInfo = { me: number; progress: number | null };
+
+export function buildMappa(it: Item): { el: HTMLElement; update: (cars: Car[] | null, info: MapInfo) => void } {
+  const o = (k: string) => opt(it, "mappa", k);
+  const el = document.createElement("div");
+  el.className = "panel mappa";
+  const NS = "http://www.w3.org/2000/svg";
+  const svg = document.createElementNS(NS, "svg");
+  const track = document.createElementNS(NS, "path");
+  track.setAttribute("class", "track");
+  const finish = document.createElementNS(NS, "line");
+  finish.setAttribute("class", "finish");
+  const dotsG = document.createElementNS(NS, "g");
+  svg.append(track, finish, dotsG);
+  const msg = document.createElement("div");
+  msg.className = "msg";
+  el.append(svg, msg);
+  let drawnKey = "";
+  let tf: (p: [number, number]) => [number, number] = (p) => p;
+  const W = 230;
+
+  /** Il disegno: ruotato/specchiato come scelto, adattato alla larghezza dell'overlay */
+  function draw(m: TrackMap) {
+    const rot = (Number(o("rotate")) || 0) * (Math.PI / 180);
+    const mirror = o("mirror") === "si" ? -1 : 1;
+    const raw = (p: [number, number]): [number, number] => {
+      const x = p[0] * mirror, y = -p[1]; // y verso l'alto nei dati, verso il basso sullo schermo
+      return [x * Math.cos(rot) - y * Math.sin(rot), x * Math.sin(rot) + y * Math.cos(rot)];
+    };
+    const pts = m.points.map(raw);
+    const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
+    const [x0, x1, y0, y1] = [Math.min(...xs), Math.max(...xs), Math.min(...ys), Math.max(...ys)];
+    const pad = 12;
+    const k = (W - pad * 2) / Math.max(x1 - x0, 1);
+    const H = Math.min(320, Math.max(90, (y1 - y0) * k + pad * 2));
+    const ky = Math.min(k, (H - pad * 2) / Math.max(y1 - y0, 1));
+    const ox = pad + ((W - pad * 2) - (x1 - x0) * ky) / 2, oy = pad + ((H - pad * 2) - (y1 - y0) * ky) / 2;
+    tf = (p) => { const r = raw(p); return [ox + (r[0] - x0) * ky, oy + (r[1] - y0) * ky]; };
+    svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+    svg.setAttribute("width", String(W));
+    svg.setAttribute("height", String(Math.round(H)));
+    track.setAttribute("d", m.points.map((p, i) => { const [x, y] = tf(p); return `${i ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`; }).join("") + "Z");
+    // linea del traguardo: perpendicolare alla pista nel punto 0
+    const [ax, ay] = tf(m.points[0]), [bx, by] = tf(m.points[2]);
+    const len = Math.hypot(bx - ax, by - ay) || 1, nx = -(by - ay) / len * 6, ny = (bx - ax) / len * 6;
+    finish.setAttribute("x1", String(ax - nx)); finish.setAttribute("y1", String(ay - ny));
+    finish.setAttribute("x2", String(ax + nx)); finish.setAttribute("y2", String(ay + ny));
+    finish.style.display = o("finish") ? "" : "none";
+    dotsG.innerHTML = "";
+  }
+
+  const at = (m: TrackMap, pct: number): [number, number] => {
+    const n = m.points.length, f = (((pct % 1) + 1) % 1) * n, i = Math.floor(f) % n, j = (i + 1) % n, t = f - Math.floor(f);
+    return tf([m.points[i][0] + (m.points[j][0] - m.points[i][0]) * t, m.points[i][1] + (m.points[j][1] - m.points[i][1]) * t]);
+  };
+  const dots = new Map<number, SVGGElement>();
+
+  return {
+    el,
+    update(cars, info) {
+      const m = trackMap;
+      svg.style.display = m ? "" : "none";
+      msg.style.display = m ? "none" : "";
+      if (!m) {
+        msg.textContent = info.progress != null
+          ? `Sto disegnando la pista: ${Math.round(info.progress * 100)}% del giro. Resta in pista fino al traguardo.`
+          : "La mappa si disegna da sola al tuo primo giro pulito (anche in prova): esci dai box e fai un giro completo.";
+        return;
+      }
+      if (m.key !== drawnKey) {
+        drawnKey = m.key;
+        dots.clear();
+        draw(m);
+      }
+      if (!cars) return;
+      const me = cars.find((c) => c.i === info.me);
+      const myProg = me ? me.lap + me.pct : 0;
+      const myClass = drivers.get(info.me)?.classId;
+      const seen = new Set<number>();
+      // la tua auto per ultima, così resta sopra le altre
+      const list = cars
+        .filter((c) => c.surf !== -1 && c.lap >= 0 && (o("cars") !== "mine" || drivers.get(c.i)?.classId === myClass))
+        .sort((a, b) => (a.i === info.me ? 1 : 0) - (b.i === info.me ? 1 : 0));
+      for (const c of list) {
+        seen.add(c.i);
+        const d = drivers.get(c.i);
+        let g = dots.get(c.i);
+        if (!g) {
+          g = document.createElementNS(NS, "g") as SVGGElement;
+          g.innerHTML = `<circle r="7"></circle><text text-anchor="middle" dy="3"></text>`;
+          dots.set(c.i, g);
+        }
+        dotsG.append(g); // l'ordine decide chi sta sopra
+        const isMe = c.i === info.me;
+        const lapped = me && !isMe && myProg - (c.lap + c.pct) > 0.5;
+        g.setAttribute("class", `car${isMe ? " me" : d?.rare ? " rare" : lapped ? " lapped" : ""}`);
+        (g.lastElementChild as SVGTextElement).textContent = o("label") === "num" ? d?.number ?? "" : String(c.cpos || c.pos || "");
+        const [x, y] = at(m, c.pct);
+        g.style.transform = `translate(${x.toFixed(1)}px, ${y.toFixed(1)}px)`;
+      }
+      for (const [i, g] of dots) if (!seen.has(i)) { g.remove(); dots.delete(i); }
+    },
+  };
+}

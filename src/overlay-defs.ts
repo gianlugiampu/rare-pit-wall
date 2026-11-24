@@ -83,6 +83,17 @@ export const DEFS: Record<string, Def> = {
       { key: "glow", label: "Intensità", min: 10, max: 100, step: 5, def: 50, unit: "%" },
     ],
   },
+  mappa: {
+    name: "Mappa",
+    desc: "Il tracciato con le auto come pallini. Si disegna da sola al tuo primo giro pulito su ogni pista e resta salvata sul PC.",
+    fields: [{ key: "finish", label: "Linea del traguardo", def: true }],
+    choices: [
+      { key: "label", label: "Nel pallino", options: [["pos", "La posizione"], ["num", "Il numero di gara"]], def: "pos" },
+      { key: "cars", label: "Auto", options: [["all", "Tutte"], ["mine", "Solo la tua classe"]], def: "all" },
+      { key: "rotate", label: "Ruota", options: [["0", "No"], ["90", "90°"], ["180", "180°"], ["270", "270°"]], def: "0" },
+      { key: "mirror", label: "Specchia", options: [["no", "No"], ["si", "Sì"]], def: "no" },
+    ],
+  },
   sessione: {
     name: "Sessione",
     desc: "Una riga con giri o tempo alla fine, incidenti, temperature, bandiera e ora.",

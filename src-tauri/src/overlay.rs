@@ -40,6 +40,7 @@ pub const KINDS: &[Kind] = &[
     kind("sessione", "Sessione", (350.0, 26.0), (0.5, 0.14)),
     kind("benzina", "Benzina", (190.0, 130.0), (0.88, 0.66)),
     kind("pedali", "Pedali", (340.0, 74.0), (0.66, 0.86)),
+    kind("mappa", "Mappa", (230.0, 170.0), (0.1, 0.55)),
     // P8.4: box del pit wall (spento di base, compare solo quando arriva un messaggio) e radar a luci
     Kind { on: false, ..kind("box", "Box del pit wall", (330.0, 34.0), (0.16, 0.34)) },
     Kind { item: "radar", edge: -1, ..kind("radar-sx", "Radar a luci", (45.0, 400.0), (0.0, 0.0)) },
@@ -372,6 +373,9 @@ struct Slow {
     laps_total: Option<i32>,
     me: i32,
     drivers_rev: i32,
+    /// P8.6: versione della mappa della pista e avanzamento del giro che la sta disegnando
+    map_rev: i32,
+    map_progress: Option<f32>,
 }
 
 /// P8.3 · un'auto in pista (10 volte al secondo, solo con Relative o Classifica aperti)
@@ -544,6 +548,10 @@ fn start_reader(app: AppHandle) {
         let mut session_num = -1;
         let (mut last_lap_n, mut fuel_at_lap, mut per_lap): (i32, Option<f32>, Vec<f32>) = (-1, None, vec![]);
         let mut tick: u32 = 0;
+        // P8.6: mappa della pista (si disegna dal primo giro pulito e si salva sul PC)
+        let map_dir = app.path().app_local_data_dir().unwrap_or_else(|_| std::env::temp_dir()).join("mappe");
+        let mut map_key = String::new();
+        let mut recorder = crate::trackmap::Recorder::default();
         loop {
             if sdk.is_none() {
                 sdk = irsdk::Irsdk::open();
@@ -574,6 +582,27 @@ fn start_reader(app: AppHandle) {
                     fast.delta_last = ok(s, "LapDeltaToSessionLastlLap_OK").then(|| f(s, "LapDeltaToSessionLastlLap"));
                     fast.car_lr = s.get("CarLeftRight").map(|v| v.as_i32()).unwrap_or(0);
                     fast.cam = s.get("CamCarIdx").map(|v| v.as_i32()).unwrap_or(-1);
+                    // P8.6: con la Mappa aperta e la pista non ancora disegnata, si registra il giro
+                    if !map_key.is_empty() && MAP.lock().unwrap().is_none() && app.get_webview_window(&label("mappa")).is_some() {
+                        let sample = crate::trackmap::Sample {
+                            t: s.get("SessionTime").map(|v| v.as_f64()).unwrap_or(0.0),
+                            pct: fast.lap_pct,
+                            vx: f(s, "VelocityX"),
+                            vy: f(s, "VelocityY"),
+                            yaw: f(s, "Yaw"),
+                            clean: game.on_track && !ok(s, "OnPitRoad") && s.get("PlayerTrackSurface").map(|v| v.as_i32()).unwrap_or(-1) == 3,
+                        };
+                        if let Some(points) = recorder.step(&sample) {
+                            let m = crate::trackmap::TrackMap { key: map_key.clone(), points };
+                            crate::trackmap::save(&map_dir, &m);
+                            *MAP.lock().unwrap() = Some(m);
+                            bump_map();
+                        }
+                        slow.map_progress = recorder.progress();
+                    } else {
+                        slow.map_progress = None;
+                    }
+                    slow.map_rev = MAP_REV.load(std::sync::atomic::Ordering::Relaxed);
                     if s.session_info_update() != info_rev {
                         info_rev = s.session_info_update();
                         let yaml = s.session_info();
@@ -586,6 +615,25 @@ fn start_reader(app: AppHandle) {
                         slow.sectors = sectors(&yaml);
                         slow.drivers_rev = info_rev;
                         *DRIVERS.lock().unwrap() = parse_drivers(&yaml, info_rev);
+                        // pista e configurazione: si carica la mappa già disegnata, se c'è
+                        let key = format!(
+                            "{}-{}",
+                            irsdk::yaml_value(&yaml, "TrackID", None).unwrap_or_default(),
+                            irsdk::yaml_value(&yaml, "TrackConfigName", None).unwrap_or_default()
+                        );
+                        if key != map_key {
+                            map_key = key.clone();
+                            *STATE_TRACK.lock().unwrap() = key.clone();
+                            let local = crate::trackmap::load(&map_dir, &key);
+                            let missing = local.is_none();
+                            *MAP.lock().unwrap() = local;
+                            bump_map();
+                            recorder.reset();
+                            if missing {
+                                let id = irsdk::yaml_value(&yaml, "TrackID", None).unwrap_or_default();
+                                fetch_site_map(&app, map_dir.clone(), key, id);
+                            }
+                        }
                         if num != session_num {
                             session_num = num;
                             per_lap.clear();
@@ -653,7 +701,7 @@ fn start_reader(app: AppHandle) {
             // P8.5: una pagina per OBS ha chiesto i dati negli ultimi 5 secondi
             let obs = OBS_SEEN.lock().unwrap().map(|t| t.elapsed() < Duration::from_secs(5)).unwrap_or(false);
             let open = windows || obs;
-            let need_cars = tick % 6 == 0 && (obs || ["relative", "classifica"].iter().any(|id| app.get_webview_window(&label(id)).is_some()));
+            let need_cars = tick % 6 == 0 && (obs || ["relative", "classifica", "mappa"].iter().any(|id| app.get_webview_window(&label(id)).is_some()));
             let mut cars: Vec<Car> = vec![];
             if let (true, Some(s)) = (need_cars && fast.connected, sdk.as_mut()) {
                 let gi = |s: &mut irsdk::Irsdk, k: &str, i: usize| s.get_at(k, i).map(|v| v.as_i32()).unwrap_or(0);
@@ -863,6 +911,45 @@ pub async fn overlay_reset(app: AppHandle) {
 #[tauri::command]
 pub async fn overlay_open_settings(app: AppHandle) {
     open_settings(&app);
+}
+
+static MAP: Mutex<Option<crate::trackmap::TrackMap>> = Mutex::new(None);
+static MAP_REV: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
+
+fn bump_map() {
+    MAP_REV.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Forma della pista dal sito: dai giri del team importati da Garage61 (coordinate GPS, più precisa del disegno dal giro)
+fn fetch_site_map(app: &AppHandle, dir: std::path::PathBuf, key: String, track_id: String) {
+    let Some(token) = crate::load_config(app).token else { return };
+    tauri::async_runtime::spawn(async move {
+        let res = crate::http().get(format!("{}/api/pitwall/trackmap?track={track_id}", crate::SITE)).bearer_auth(token).send().await;
+        let Ok(r) = res else { return };
+        if !r.status().is_success() {
+            return;
+        }
+        let Ok(m) = r.json::<crate::trackmap::TrackMap>().await else { return };
+        if m.points.len() < 50 {
+            return;
+        }
+        let m = crate::trackmap::TrackMap { key: key.clone(), points: m.points };
+        let mut cur = MAP.lock().unwrap();
+        // solo se si è ancora su quella pista e non è già stata disegnata dal giro
+        if cur.is_none() && STATE_TRACK.lock().unwrap().as_str() == key {
+            crate::trackmap::save(&dir, &m);
+            *cur = Some(m);
+            drop(cur);
+            bump_map();
+        }
+    });
+}
+static STATE_TRACK: Mutex<String> = Mutex::new(String::new());
+
+/// P8.6 · mappa della pista attuale (None finché non è disegnata)
+#[tauri::command]
+pub fn overlay_map() -> Option<crate::trackmap::TrackMap> {
+    MAP.lock().unwrap().clone()
 }
 
 /// P8.3 · elenco dei piloti della sessione (la pagina lo richiede quando cambia la versione)
