@@ -40,6 +40,60 @@ pub struct CarRec {
     pending: Option<(i32, bool, Instant)>,
 }
 
+/// Un campione di telemetria della tua auto
+#[derive(Clone, Copy, Default)]
+struct Sample {
+    pct: f64,
+    t: f64,
+    spd: f64,
+    thr: f64,
+    brk: f64,
+    gear: f64,
+    rpm: f64,
+    str_: f64,
+    lat: f64,
+    lon: f64,
+}
+
+/// Giro ridotto a 500 punti alla stessa distanza (formato della pagina Telemetria, come lib/telemetry.ts del sito)
+fn reduce(samples: &[Sample], lap_s: f64) -> Option<serde_json::Value> {
+    let rows: Vec<&Sample> = samples.iter().collect();
+    if rows.len() < 100 {
+        return None;
+    }
+    let n = 500usize;
+    let (mut t, mut spd, mut thr, mut brk, mut gear, mut rpm, mut str_, mut lat, mut lon) = (vec![], vec![], vec![], vec![], vec![], vec![], vec![], vec![], vec![]);
+    let mut j = 0usize;
+    for k in 0..n {
+        let x = k as f64 / (n - 1) as f64;
+        while j < rows.len() - 2 && rows[j + 1].pct <= x {
+            j += 1;
+        }
+        let (a, b) = (rows[j], rows[j + 1]);
+        let f = if b.pct > a.pct { ((x - a.pct) / (b.pct - a.pct)).clamp(0.0, 1.0) } else { 0.0 };
+        let r = if f < 0.5 { a } else { b };
+        t.push(((a.t + (b.t - a.t) * f) * 1000.0).round() / 1000.0);
+        spd.push((r.spd * 3.6 * 10.0).round() / 10.0);
+        thr.push((r.thr * 100.0).round());
+        brk.push((r.brk * 100.0).round());
+        gear.push(r.gear);
+        rpm.push(r.rpm.round());
+        str_.push((r.str_.to_degrees() * 10.0).round() / 10.0);
+        lat.push((r.lat * 1e6).round() / 1e6);
+        lon.push((r.lon * 1e6).round() / 1e6);
+    }
+    t[n - 1] = (lap_s * 1000.0).round() / 1000.0;
+    // lunghezza del giro dalle coordinate
+    let rad = |d: f64| d.to_radians();
+    let mut len = 0.0;
+    for i in 1..n {
+        let (la1, lo1, la2, lo2) = (lat[i - 1], lon[i - 1], lat[i], lon[i]);
+        let a = (rad(la2 - la1) / 2.0).sin().powi(2) + rad(la1).cos() * rad(la2).cos() * (rad(lo2 - lo1) / 2.0).sin().powi(2);
+        len += 2.0 * 6_371_000.0 * a.sqrt().asin();
+    }
+    Some(serde_json::json!({ "v": 1, "n": n, "lenM": len.round(), "t": t, "spd": spd, "thr": thr, "brk": brk, "gear": gear, "rpm": rpm, "str": str_, "lat": lat, "lon": lon }))
+}
+
 #[derive(Default)]
 pub struct LapRec {
     pub key: String,
@@ -60,6 +114,14 @@ pub struct LapRec {
     my_lap_fuel: Option<f32>,
     my_incidents: i32,
     my_extra: Option<(Vec<f64>, Option<f32>)>,
+    /// telemetria della tua auto nel giro in corso (20 campioni al secondo) e posizione stimata se iRacing non dà Lat/Lon
+    my_samples: Vec<Sample>,
+    my_xy: (f64, f64),
+    my_cust: i64,
+    /// giro appena finito: (campioni, numero del giro)
+    my_lap_samples: Option<Vec<Sample>>,
+    /// telemetria del tuo giro pulito più veloce della sessione: (giro, tempo ms, dati)
+    best_tel: Option<(i32, f64, serde_json::Value)>,
     changed: bool,
     sent_at: Option<Instant>,
 }
@@ -92,6 +154,7 @@ impl LapRec {
             format!("off-{my_cust}-{}", started_at.replace(['-', ':', 'T', 'Z'], "").chars().take(12).collect::<String>())
         };
         let mut r = LapRec {
+            my_cust,
             key,
             subsession,
             session_type: session_type.to_string(),
@@ -160,8 +223,43 @@ impl LapRec {
                 let _ = k;
             }
         }
+        // telemetria della tua auto (Lat/Lon se iRacing li dà, altrimenti posizione stimata da velocità e direzione)
+        let gf = |s: &mut irsdk::Irsdk, k: &str| s.get(k).map(|v| v.as_f64()).unwrap_or(0.0);
+        let (mut lat, mut lon) = (gf(s, "Lat"), gf(s, "Lon"));
+        if lat == 0.0 && lon == 0.0 {
+            let dt = self.my_samples.last().map(|p| (t - p.t).clamp(0.0, 0.5)).unwrap_or(0.0);
+            let (vx, vy, yaw) = (gf(s, "VelocityX"), gf(s, "VelocityY"), gf(s, "Yaw"));
+            self.my_xy.0 += (vx * yaw.cos() - vy * yaw.sin()) * dt;
+            self.my_xy.1 += (vx * yaw.sin() + vy * yaw.cos()) * dt;
+            lat = self.my_xy.1 / 110_540.0;
+            lon = self.my_xy.0 / 111_320.0;
+        }
         let crossed = self.my_last_pct > 0.9 && pct < 0.1;
+        if !crossed && pct >= self.my_last_pct {
+            let lap_t = t - self.my_samples.first().map(|p| p.t).unwrap_or(t);
+            let _ = lap_t;
+            self.my_samples.push(Sample {
+                pct: pct as f64,
+                t,
+                spd: gf(s, "Speed"),
+                thr: gf(s, "Throttle"),
+                brk: gf(s, "Brake"),
+                gear: gf(s, "Gear"),
+                rpm: gf(s, "RPM"),
+                str_: gf(s, "SteeringWheelAngle"),
+                lat,
+                lon,
+            });
+        }
         if crossed {
+            // campioni del giro appena finito, con il tempo che parte da zero
+            let mut lap = std::mem::take(&mut self.my_samples);
+            if let Some(t0) = lap.first().map(|p| p.t) {
+                for p in lap.iter_mut() {
+                    p.t -= t0;
+                }
+            }
+            self.my_lap_samples = Some(lap);
             // fine del tuo giro: ultimo settore e consumo (si attaccano al giro quando iRacing dà il tempo)
             let mut secs = std::mem::take(&mut self.my_sectors);
             secs.push(t - self.my_sector_t);
@@ -206,6 +304,13 @@ impl LapRec {
                         self.changed = true;
                         if me {
                             self.my_extra = None;
+                            let samples = self.my_lap_samples.take();
+                            let better = self.best_tel.as_ref().map(|b| last * 1000.0 < b.1).unwrap_or(true);
+                            if clean && better {
+                                if let Some(data) = samples.as_deref().and_then(|sm| reduce(sm, last)) {
+                                    self.best_tel = Some((n, last * 1000.0, data));
+                                }
+                            }
                         }
                     }
                 }
@@ -224,6 +329,8 @@ impl LapRec {
             "trackConfig": self.track_config,
             "startedAt": self.started_at,
             "cars": self.cars.values().filter(|c| !c.laps.is_empty()).collect::<Vec<_>>(),
+            // telemetria del tuo giro pulito più veloce (per la pagina Telemetria)
+            "telemetry": self.best_tel.as_ref().map(|(n, ms, data)| serde_json::json!({ "n": n, "ms": ms, "custId": self.my_cust, "data": data })),
         })
     }
 
