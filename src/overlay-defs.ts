@@ -129,6 +129,7 @@ export const DEFS: Record<string, Def> = {
       { key: "gear", label: "Marcia e velocità", def: true },
       { key: "steer", label: "Sterzo", def: false },
       { key: "clutch", label: "Frizione", def: false },
+      { key: "pct", label: "Percentuali di gas, freno e frizione", def: false },
     ],
   },
 };

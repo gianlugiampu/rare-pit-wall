@@ -266,6 +266,11 @@ function buildPedali(it: Item): View {
   if (o("clutch")) bars.append(cB);
   bars.append(bB, tB);
   if (o("bars")) el.append(bars);
+  // percentuali (facoltative): gas, freno e, se la frizione è accesa, frizione
+  const pcts = document.createElement("div");
+  pcts.className = "pcts tab";
+  pcts.innerHTML = `<span class="pb">G <b>0</b></span><span class="bad">F <b>0</b></span>${o("clutch") ? `<span class="muted">C <b>0</b></span>` : ""}`;
+  if (o("pct")) el.append(pcts);
   const gear = document.createElement("div");
   gear.className = "gear";
   gear.innerHTML = `<b class="d">N</b><b>0</b>`;
@@ -291,6 +296,10 @@ function buildPedali(it: Item): View {
       (tB.firstElementChild as HTMLElement).style.height = `${f.throttle * 100}%`;
       (bB.firstElementChild as HTMLElement).style.height = `${f.brake * 100}%`;
       (cB.firstElementChild as HTMLElement).style.height = `${f.clutch * 100}%`;
+      const nums = pcts.querySelectorAll("b");
+      nums[0].textContent = String(Math.round(f.throttle * 100));
+      nums[1].textContent = String(Math.round(f.brake * 100));
+      if (nums[2]) nums[2].textContent = String(Math.round(f.clutch * 100));
       (gear.firstElementChild as HTMLElement).textContent = !f.connected ? dash : f.gear === -1 ? "R" : f.gear === 0 ? "N" : String(f.gear);
       (gear.lastElementChild as HTMLElement).textContent = f.connected ? String(Math.round(f.speedKmh)) : dash;
     },
@@ -394,6 +403,12 @@ const params = new URLSearchParams(location.search);
 let id = params.get("id") ?? "delta";
 side = Number(params.get("side") ?? -1);
 let cfg: Config = { edit: params.has("edit"), items: {} };
+// solo anteprima nel browser: ?scala=150&opts=pct,clutch per provare grandezza e caselle
+if (params.has("scala") || params.has("opts")) {
+  const o: Record<string, boolean> = {};
+  for (const k of (params.get("opts") ?? "").split(",").filter(Boolean)) o[k] = true;
+  cfg.items[params.get("id") ?? "delta"] = { on: true, opacity: 86, scale: Number(params.get("scala") ?? 100), opts: o };
+}
 let view: View | null = null;
 let lastSlow: Slow | null = null;
 let lastFast: Fast | null = null;
