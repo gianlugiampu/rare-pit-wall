@@ -311,6 +311,36 @@ pub fn toggle_edit(app: &AppHandle) {
     set_edit(app, on);
 }
 
+/// Comando rapido: riferimento del delta a giro (tuo migliore → migliore della sessione → ultimo giro)
+pub fn cycle_delta(app: &AppHandle) {
+    let (s, next) = {
+        let mut st = STATE.lock().unwrap();
+        let mut it = st.settings.item("delta");
+        let cur = it.opts.get("reference").and_then(|v| v.as_str()).unwrap_or("best").to_string();
+        let next = match cur.as_str() {
+            "best" => "session",
+            "session" => "last",
+            _ => "best",
+        };
+        if !it.opts.is_object() {
+            it.opts = serde_json::json!({});
+        }
+        it.opts["reference"] = serde_json::json!(next);
+        st.settings.items.insert("delta".into(), it);
+        (st.settings.clone(), next)
+    };
+    save(app, &s);
+    sync(app);
+    let name = match next {
+        "session" => "Delta sul migliore della sessione",
+        "last" => "Delta sul tuo ultimo giro",
+        _ => "Delta sul tuo giro migliore",
+    };
+    // lo dice anche la voce, così si sa cosa si sta guardando senza staccare gli occhi dalla pista
+    *crate::ASK.lock().unwrap() = None;
+    crate::say_text(name);
+}
+
 pub fn toggle_hidden(app: &AppHandle) {
     {
         let mut st = STATE.lock().unwrap();

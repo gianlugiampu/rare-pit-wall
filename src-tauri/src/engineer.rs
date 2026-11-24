@@ -488,6 +488,76 @@ fn say_delta(d: f32) -> String {
     }
 }
 
+/// Risposta a una domanda fatta con un comando rapido: «benzina», «distacchi», «posizione», «tempi»
+pub fn answer(t: &Tele, what: &str) -> String {
+    match what {
+        "benzina" => {
+            let mut s = format!("Benzina: {} litri", t.fuel_l.round() as i32);
+            if let Some(per) = t.fuel_per_lap.filter(|p| *p > 0.05) {
+                let laps = t.fuel_l / per;
+                s += &format!(", {} giri", (laps * 10.0).floor() / 10.0).replace('.', " e ");
+                let remain = t.laps_remain.map(|r| r as f32).or_else(|| match (t.time_remain, t.best_lap > 0.0) {
+                    (Some(sec), true) => Some((sec as f32 / t.best_lap).ceil() + 1.0),
+                    _ => None,
+                });
+                if let Some(r) = remain {
+                    let need = ((r + 0.3) * per - t.fuel_l).ceil();
+                    s += &if need > 0.0 { format!(". Al box servono {} litri", need as i32) } else { ". Basta fino alla fine".to_string() };
+                }
+            } else {
+                s += ". Il consumo lo so dopo un paio di giri";
+            }
+            s
+        }
+        "distacchi" => {
+            let a = t.gap_ahead.map(|g| format!("davanti a {}", say_gap(g)));
+            let b = t.gap_behind.map(|g| format!("dietro a {}", say_gap(g)));
+            match (a, b) {
+                (Some(a), Some(b)) => format!("{}, {}", capitalize(&a), b),
+                (Some(a), None) => capitalize(&a),
+                (None, Some(b)) => capitalize(&b),
+                _ => "Distacchi non disponibili".into(),
+            }
+        }
+        "posizione" => {
+            let mut s = if t.position > 0 { format!("Sei P{}", t.position) } else { "Posizione non disponibile".into() };
+            if let Some(l) = t.laps_remain {
+                s += &match l {
+                    0 => ", ultimo giro".to_string(),
+                    1 => ", manca un giro".to_string(),
+                    n => format!(", mancano {n} giri"),
+                };
+            } else if let Some(sec) = t.time_remain {
+                let m = (sec / 60.0).round() as i32;
+                s += &format!(", mancano {m} minut{}", if m == 1 { "o" } else { "i" });
+            }
+            s
+        }
+        "tempi" => {
+            if t.last_lap <= 0.0 && t.best_lap <= 0.0 {
+                return "Nessun giro ancora".into();
+            }
+            let mut s = String::new();
+            if t.last_lap > 0.0 {
+                s += &format!("Ultimo {}", say_time(t.last_lap));
+            }
+            if t.best_lap > 0.0 {
+                s += &format!("{}migliore {}", if s.is_empty() { "" } else { ", " }, say_time(t.best_lap));
+                if t.last_lap > 0.0 {
+                    s += &format!(", {}", say_delta(t.last_lap - t.best_lap));
+                }
+            }
+            capitalize(&s)
+        }
+        _ => String::new(),
+    }
+}
+
+fn capitalize(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+}
+
 /// 1,24 → «1 e 2», 0,8 → «8 decimi»
 fn say_gap(g: f32) -> String {
     let tenths = (g.abs() * 10.0).round() as i32;
@@ -501,6 +571,14 @@ fn say_gap(g: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn risposte() {
+        let t = Tele { fuel_l: 22.4, fuel_per_lap: Some(2.6), laps_remain: Some(10), position: 6, gap_ahead: Some(1.24), gap_behind: Some(0.8), last_lap: 105.6, best_lap: 105.3, ..Default::default() };
+        assert_eq!(answer(&t, "benzina"), "Benzina: 22 litri, 8 e 6 giri. Al box servono 5 litri");
+        assert_eq!(answer(&t, "distacchi"), "Davanti a 1 e 2, dietro a 8 decimi");
+        assert_eq!(answer(&t, "posizione"), "Sei P6, mancano 10 giri");
+        assert_eq!(answer(&t, "tempi"), "Ultimo 1 minuto 45 e 6, migliore 1 minuto 45 e 3, più 3 decimi");
+    }
     #[test]
     fn frasi() {
         assert_eq!(say_time(105.62), "1 minuto 45 e 6");

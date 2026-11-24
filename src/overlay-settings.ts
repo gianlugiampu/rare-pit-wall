@@ -18,6 +18,81 @@ const OBS: [string, string, string][] = [
   ["sponsor", "Sponsor a ciclo", "470 × 160"],
 ];
 
+// ——— Comandi rapidi: tasti del volante e tastiera ———
+type Binding = { key?: string | null; device?: string | null; button?: number | null };
+type Controls = { actions: { id: string; name: string }[]; bindings: Record<string, Binding>; assigning: string | null; devices: string[] };
+let listeningKey: string | null = null;
+
+/** «Control+Shift+KeyB» → «Ctrl+Maiusc+B» */
+const keyLabel = (k: string) =>
+  k.replace("Control", "Ctrl").replace("Shift", "Maiusc").replace(/Key([A-Z])/, "$1").replace(/Digit(\d)/, "$1").replace("Numpad", "Tast.num ");
+
+async function renderControls() {
+  if (!IN_APP) return;
+  const c = await invoke<Controls>("controls_state");
+  const ul = $("ctl");
+  ul.innerHTML = "";
+  for (const a of c.actions) {
+    const b = c.bindings[a.id] ?? {};
+    const parts: string[] = [];
+    if (b.key) parts.push(`Tastiera: ${keyLabel(b.key)}`);
+    if (b.device && b.button) parts.push(`${b.device}: tasto ${b.button}`);
+    const li = document.createElement("li");
+    li.innerHTML = `<span><b></b></span><span class="bind"></span><button type="button" class="ghost">Volante</button><button type="button" class="ghost">Tastiera</button><button type="button" class="ghost">Togli</button><button type="button" class="ghost">Prova</button>`;
+    li.querySelector("b")!.textContent = a.name;
+    const bind = li.querySelector(".bind") as HTMLElement;
+    if (c.assigning === a.id) {
+      bind.textContent = "Premi ora il tasto del volante… (15 s)";
+      bind.classList.add("wait");
+    } else if (listeningKey === a.id) {
+      bind.textContent = "Premi ora la combinazione sulla tastiera (Esc = annulla)";
+      bind.classList.add("wait");
+    } else {
+      bind.textContent = parts.join(" · ") || "nessun tasto";
+    }
+    const [joy, kb, clear, test] = li.querySelectorAll("button");
+    joy.addEventListener("click", async () => {
+      await invoke("controls_assign_button", { action: a.id });
+      renderControls();
+    });
+    kb.addEventListener("click", () => {
+      listeningKey = a.id;
+      renderControls();
+    });
+    clear.addEventListener("click", async () => {
+      await invoke("controls_set_key", { action: a.id, key: null });
+      await invoke("controls_clear_button", { action: a.id });
+      renderControls();
+    });
+    test.addEventListener("click", () => invoke("controls_test", { action: a.id }));
+    ul.append(li);
+  }
+  $("ctl-dev").textContent = c.devices.length ? `Volanti e periferiche collegati: ${c.devices.join(", ")}.` : "Nessun volante trovato: collegalo e aspetta qualche secondo.";
+  if (c.assigning) setTimeout(renderControls, 500);
+}
+
+// tastiera: la combinazione premuta nella finestra diventa il tasto rapido dell'azione
+window.addEventListener("keydown", async (e) => {
+  if (!listeningKey) return;
+  e.preventDefault();
+  if (e.key === "Escape") {
+    listeningKey = null;
+    renderControls();
+    return;
+  }
+  if (["Control", "Shift", "Alt", "Meta"].includes(e.key)) return;
+  const mods = [e.ctrlKey && "Control", e.altKey && "Alt", e.shiftKey && "Shift"].filter(Boolean) as string[];
+  const key = [...mods, e.code].join("+");
+  const action = listeningKey;
+  listeningKey = null;
+  try {
+    await invoke("controls_set_key", { action, key });
+  } catch (err) {
+    alert(String(err));
+  }
+  renderControls();
+});
+
 function renderObs() {
   const ul = $("obs");
   ul.innerHTML = "";
@@ -223,4 +298,6 @@ window.addEventListener("DOMContentLoaded", async () => {
   renderList();
   renderDetail();
   renderObs();
+  renderControls();
+  if (IN_APP) await listen("controls-changed", () => renderControls());
 });

@@ -3,6 +3,7 @@
 //! si abbina all'account del pilota con un codice preso dal Profilo dell'area piloti.
 
 mod clips;
+mod controls;
 mod dash;
 mod engineer;
 mod irsdk;
@@ -21,6 +22,14 @@ use tauri::{
     tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
     AppHandle, Emitter, Manager, WindowEvent,
 };
+
+/// Domanda fatta con un comando rapido («benzina», «distacchi», «posizione», «tempi»): la dice l'ingegnere
+pub static ASK: Mutex<Option<String>> = Mutex::new(None);
+/// Frase da dire subito (es. «Delta sul migliore della sessione» dopo il comando rapido)
+static SAY_TEXT: Mutex<Option<String>> = Mutex::new(None);
+pub fn say_text(t: &str) {
+    *SAY_TEXT.lock().unwrap() = Some(t.to_string());
+}
 
 pub const SITE: &str = "https://rareprojectmotorsport.com";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -443,6 +452,15 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                     };
                     let settings = shared.engineer.lock().unwrap().clone();
                     eng.update(&tele, &settings);
+                    // comando rapido: risposta subito, anche con l'ingegnere spento
+                    let ask = ASK.lock().unwrap().take();
+                    if let Some(what) = ask {
+                        let text = engineer::answer(&tele, &what);
+                        if !text.is_empty() {
+                            eng.apply(&settings);
+                            eng.say_now(&text);
+                        }
+                    }
                     // P5: pit wall dal vivo ogni 2 secondi (acceso a mano, o in automatico nelle gare del calendario)
                     let manual = *shared.live_manual.lock().unwrap();
                     let auto = !load_config_cached(&app, tick).pitwall_auto_off;
@@ -524,7 +542,7 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
             }
             // La finestrella si aggiorna due volte al secondo; il cruscotto 20 volte al secondo
             // P4: prova della voce dalla finestrella
-            let test = shared.say.lock().unwrap().take();
+            let test = shared.say.lock().unwrap().take().or_else(|| SAY_TEXT.lock().unwrap().take());
             if let Some(text) = test {
                 let settings = shared.engineer.lock().unwrap().clone();
                 eng.apply(&settings);
@@ -840,7 +858,8 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(shared.clone())
         .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto, get_moments, jump_to_moment, export_clips, clip_status, cancel_clips, open_videos, clip_files, send_clip,
-            overlay::overlay_state, overlay::overlay_save, overlay::overlay_edit, overlay::overlay_reset, overlay::overlay_open_settings, overlay::overlay_hello, overlay::overlay_drivers, overlay::overlay_map, overlay::overlay_map_dir])
+            overlay::overlay_state, overlay::overlay_save, overlay::overlay_edit, overlay::overlay_reset, overlay::overlay_open_settings, overlay::overlay_hello, overlay::overlay_drivers, overlay::overlay_map, overlay::overlay_map_dir,
+            controls::controls_state, controls::controls_assign_button, controls::controls_set_key, controls::controls_clear_button, controls::controls_test])
         .setup(move |app| {
             // Parte con Windows (si può togliere da Impostazioni → App → Avvio)
             {
@@ -916,11 +935,15 @@ pub fn run() {
                                     overlay::toggle_hidden(app);
                                 } else if *sc == edit {
                                     overlay::toggle_edit(app);
+                                } else {
+                                    controls::on_shortcut(app, sc);
                                 }
                             }
                         })
                         .build(),
                 )?;
+                // comandi rapidi assegnati dal pilota (tastiera e tasti del volante)
+                controls::init(app.handle());
                 for sc in [toggle, edit] {
                     if let Err(e) = app.global_shortcut().register(sc) {
                         site_log(load_config(app.handle()).token, format!("tasto rapido degli overlay non registrato: {e}"));

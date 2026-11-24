@@ -31,3 +31,6 @@ input[type=range] { accent-color: var(--main); }
 .obs-list li em { display: block; font-style: normal; font-size: 11px; color: var(--ink400); }
 .obs-list code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--p300); font-size: 12px; user-select: text; }
 .obs-list button { padding: 6px 12px; margin: 0; font-size: 12px; }
+.ctl-list li { grid-template-columns: 190px 1fr auto auto auto auto; }
+.ctl-list .bind { color: var(--p300); font-size: 12px; }
+.ctl-list .bind.wait { color: var(--pb); font-weight: 700; }
