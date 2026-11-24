@@ -2,6 +2,7 @@
 //! P1 (base): legge iRacing, mostra lo stato nella finestrella e nell'icona vicino all'orologio,
 //! si abbina all'account del pilota con un codice preso dal Profilo dell'area piloti.
 
+mod clips;
 mod dash;
 mod engineer;
 mod irsdk;
@@ -626,6 +627,31 @@ fn jump_to_moment(session_num: i32, t: f64, car_number: String) {
     moments::jump_to(session_num, t, &car_number);
 }
 
+/// P6b · clip video dei momenti scelti (registrazione integrata di iRacing, dal replay)
+#[tauri::command]
+fn export_clips(session_num: i32, jobs: Vec<clips::ClipJob>, camera: String) {
+    clips::export(session_num, jobs, camera);
+}
+
+#[tauri::command]
+fn clip_status() -> clips::ClipStatus {
+    clips::status()
+}
+
+#[tauri::command]
+fn cancel_clips() {
+    clips::cancel();
+}
+
+/// Apre la cartella dei video di iRacing
+#[tauri::command]
+fn open_videos() {
+    if let Some(dir) = clips::videos_dir() {
+        let _ = std::fs::create_dir_all(&dir);
+        let _ = std::process::Command::new("explorer").arg(dir).spawn();
+    }
+}
+
 /// P5 · pit wall acceso/spento a mano (vale fino alla chiusura del programma)
 #[tauri::command]
 fn set_live_manual(shared: tauri::State<Arc<Shared>>, on: bool) {
@@ -798,7 +824,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(shared.clone())
-        .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto, get_moments, jump_to_moment,
+        .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto, get_moments, jump_to_moment, export_clips, clip_status, cancel_clips, open_videos,
             overlay::overlay_state, overlay::overlay_save, overlay::overlay_edit, overlay::overlay_reset, overlay::overlay_open_settings, overlay::overlay_hello, overlay::overlay_drivers, overlay::overlay_map, overlay::overlay_map_dir])
         .setup(move |app| {
             // Parte con Windows (si può togliere da Impostazioni → App → Avvio)

@@ -70,6 +70,28 @@
         <p id="mom-head" class="small"></p>
         <ul id="mom-list" class="mom-list"></ul>
         <p class="small">Apri il replay della gara su iRacing, poi premi «Vai»: il replay salta lì (5 secondi prima) e inquadra l'auto.</p>
+        <div id="clips" class="clips" hidden>
+          <p class="k">Clip video</p>
+          <p class="small">Spunta i momenti e premi «Esporta»: con il replay aperto, iRacing registra 5 secondi prima e 10 dopo ogni momento.
+            Serve la registrazione video attiva nelle opzioni di iRacing.</p>
+          <div class="clip-row">
+            <a href="#" id="clip-all" class="link">Tutti</a> · <a href="#" id="clip-none" class="link">Nessuno</a>
+            <label class="clip-cam">Inquadratura
+              <select id="clip-cam">
+                <option value="tv">TV</option>
+                <option value="inseguimento">Inseguimento</option>
+                <option value="cockpit">Cockpit</option>
+                <option value="elicottero">Elicottero</option>
+              </select>
+            </label>
+          </div>
+          <div class="clip-row">
+            <button type="button" id="clip-go">Esporta clip</button>
+            <button type="button" id="clip-stop" class="ghost" hidden>Annulla</button>
+            <button type="button" id="clip-dir" class="ghost">Apri cartella</button>
+          </div>
+          <p id="clip-msg" class="small"></p>
+        </div>
       </details>
       <details id="eng" class="eng">
         <summary>Ingegnere a voce</summary>

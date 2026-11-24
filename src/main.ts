@@ -16,8 +16,11 @@ type Moment = { key: string; kind: string; car: string; carNumber: string; text:
 type RaceMoments = { subsession: number; sessionNum: number; track: string; moments: Moment[] };
 const ICON: Record<string, string> = { start: "🚦", overtake: "⬆️", lost: "⬇️", offtrack: "⚠️", incident: "💥", fastlap: "⏱️", fastest: "🟣", battle: "⚔️", lastlap: "🏳️", finish: "🏁" };
 
+let lastRace: RaceMoments | null = null;
 async function loadMoments() {
   const r = await invoke<RaceMoments | null>("get_moments");
+  lastRace = r;
+  $("clips").hidden = !r || !r.moments.length;
   const list = $("mom-list");
   if (!r || !r.moments.length) {
     $("mom-head").textContent = "Nessuna gara ancora: i momenti si segnano da soli durante le gare.";
@@ -28,6 +31,13 @@ async function loadMoments() {
   list.innerHTML = "";
   for (const m of r.moments) {
     const li = document.createElement("li");
+    // P6b: casella per scegliere i momenti da trasformare in clip
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.className = "clip-pick";
+    cb.dataset.t = String(m.t);
+    cb.dataset.car = m.carNumber;
+    li.append(cb);
     const span = document.createElement("span");
     span.innerHTML = `${ICON[m.kind] ?? "•"} giro ${m.lap} · <b></b> `;
     (span.querySelector("b") as HTMLElement).textContent = m.car;
@@ -162,6 +172,35 @@ window.addEventListener("DOMContentLoaded", async () => {
   $("e-test").addEventListener("click", async () => {
     await saveEng();
     await invoke("test_voice");
+  });
+  // P6b · clip video dei momenti scelti
+  const picks = () => [...document.querySelectorAll<HTMLInputElement>(".clip-pick")];
+  $("clip-all").addEventListener("click", (e) => { e.preventDefault(); picks().forEach((c) => (c.checked = true)); });
+  $("clip-none").addEventListener("click", (e) => { e.preventDefault(); picks().forEach((c) => (c.checked = false)); });
+  $("clip-dir").addEventListener("click", () => invoke("open_videos"));
+  $("clip-stop").addEventListener("click", () => invoke("cancel_clips"));
+  let clipTimer: number | undefined;
+  const showClips = async () => {
+    const s = await invoke<{ running: boolean; done: number; total: number; message: string; error: boolean }>("clip_status");
+    const msg = $("clip-msg");
+    msg.textContent = s.message;
+    msg.style.color = s.error ? "var(--live)" : "";
+    $<HTMLButtonElement>("clip-go").disabled = s.running;
+    $("clip-stop").hidden = !s.running;
+    if (!s.running && clipTimer) {
+      clearInterval(clipTimer);
+      clipTimer = undefined;
+    }
+  };
+  $("clip-go").addEventListener("click", async () => {
+    const jobs = picks().filter((c) => c.checked).map((c) => ({ t: Number(c.dataset.t), carNumber: c.dataset.car ?? "" }));
+    if (!lastRace || !jobs.length) {
+      $("clip-msg").textContent = "Spunta almeno un momento.";
+      return;
+    }
+    await invoke("export_clips", { sessionNum: lastRace.sessionNum, jobs, camera: $<HTMLSelectElement>("clip-cam").value });
+    clipTimer = window.setInterval(showClips, 500);
+    showClips();
   });
   // Momenti dell'ultima gara: si caricano quando si apre il riquadro
   $("mom").addEventListener("toggle", () => {

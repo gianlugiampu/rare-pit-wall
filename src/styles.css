@@ -71,4 +71,10 @@ footer { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line);
 .eng select { background: var(--dark); color: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 6px; font: inherit; }
 .eng input[type=range] { accent-color: var(--main); }
 .wide { display: block; width: 100%; }
+.clips { margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line); }
+.clip-row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 12px; flex-wrap: wrap; }
+.clip-row button { margin: 0; padding: 7px 12px; font-size: 12px; }
+.clip-cam { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.clip-cam select { background: var(--dark); color: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 4px; font: inherit; }
+.mom-list input[type=checkbox] { accent-color: var(--main); width: 15px; height: 15px; margin: 0; flex: none; }
 .ghost { margin-top: 12px; background: transparent; border: 1px solid var(--main); padding: 8px 14px; }
