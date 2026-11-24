@@ -93,6 +93,8 @@ b { font-weight: 700; color: #fff; }
 .head .r { position: relative; margin-left: auto; font-size: 9.5px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--purple-200); }
 .row { display: flex; align-items: center; gap: 6px; height: 22px; padding-right: 8px; border-top: 1px solid rgb(255 255 255 / .05); white-space: nowrap; }
 .row.mine { border-top-color: transparent; background: linear-gradient(90deg, var(--purple-900), rgb(10 6 14 / 0) 80%); box-shadow: inset 2px 0 0 var(--rare-main); }
+/* compagno di squadra Rare: come la tua riga ma più leggera */
+.row.mate { border-top-color: transparent; background: linear-gradient(90deg, rgb(38 0 63 / .7), rgb(10 6 14 / 0) 75%); box-shadow: inset 2px 0 0 var(--purple-300); }
 .row.empty { justify-content: center; color: var(--ink-400); padding: 0 8px; }
 .row.cols { height: 18px; border-top: 0; font-size: 9.5px; text-transform: uppercase; letter-spacing: .05em; color: var(--ink-400); }
 .row .cls { align-self: stretch; width: 3px; flex: none; }

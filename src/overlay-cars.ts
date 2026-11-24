@@ -175,7 +175,7 @@ export function buildRelative(it: Item): CarView {
           const isMe = tone === "me";
           const nameCls = isMe ? "me" : d?.rare ? "rare" : tone;
           const extra = o("team") ? `<span class="team">${esc(d?.team && d.team !== d.full ? d.team : d?.flair ?? "")}</span>` : "";
-          return `<div class="row${isMe ? " mine" : ""}">
+          return `<div class="row${isMe ? " mine" : d?.rare ? " mate" : ""}">
             ${o("classColor") ? `<span class="cls" style="background:${d?.classColor || "transparent"}"></span>` : ""}
             ${posPill(c.cpos || c.pos)}
             <span class="num d">${esc(d?.number ?? "")}</span>
@@ -261,7 +261,7 @@ export function buildClassifica(it: Item): CarView {
           const st = startPos.get(c.i);
           const chg = race && st && c.cpos > 0 ? st - c.cpos : 0;
           const bestCls = c.best > 0 && c.best === fastest ? "best" : isMe ? "pb" : "muted";
-          return `<div class="row${isMe ? " mine" : ""}">
+          return `<div class="row${isMe ? " mine" : d?.rare ? " mate" : ""}">
             ${o("classColor") ? `<span class="cls" style="background:${d?.classColor || "transparent"}"></span>` : ""}
             ${posPill(c.cpos || k + 1)}
             ${o("chg") ? `<span class="chg ${chg > 0 ? "pb" : "bad"}">${chg ? `${chg > 0 ? "▲" : "▼"}${Math.abs(chg)}` : ""}</span>` : ""}
