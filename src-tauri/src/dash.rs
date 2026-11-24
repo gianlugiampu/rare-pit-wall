@@ -48,6 +48,12 @@ pub fn start(dash: Arc<Mutex<Dash>>) -> Option<String> {
         for req in server.incoming_requests() {
             let path = req.url().split('?').next().unwrap_or("/").to_string();
             let header = |k: &str, v: &str| tiny_http::Header::from_bytes(k.as_bytes(), v.as_bytes()).unwrap();
+            // P8.5: grafiche per la diretta (OBS)
+            if let Some((ctype, body)) = crate::overlay::obs_http(&path) {
+                let res = tiny_http::Response::from_data(body).with_header(header("Content-Type", ctype)).with_header(header("Cache-Control", "no-store"));
+                let _ = req.respond(res);
+                continue;
+            }
             let res = match path.as_str() {
                 "/dati" => {
                     let body = serde_json::to_string(&*dash.lock().unwrap()).unwrap_or_default();

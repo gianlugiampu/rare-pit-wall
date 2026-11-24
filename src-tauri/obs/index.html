@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<title>Rare Pit Wall · grafica per la diretta</title>
+<!--
+  P8.5 · Grafiche per la diretta (bozza v2 approvata da Gianluca il 24/11/2026).
+  Una pagina per tutte: la grafica dipende dall'indirizzo, da aggiungere in OBS come «sorgente browser»:
+    /obs/torre  /obs/battaglia  /obs/pilota  /obs/guida  /obs/sponsor
+  Opzioni nell'indirizzo: ?scala=1.5 (grandezza, 1.5 = diretta 1920×1080), ?righe=10 (torre), ?secondi=8 (sponsor),
+  ?soglia=1 (battaglia: secondi di distacco), ?prova (dati di esempio, per sistemare la scena senza iRacing).
+  Seguono l'auto inquadrata in iRacing; senza iRacing non si vede niente (tranne lo sponsor).
+-->
+<style>
+@font-face { font-family: "Good Timing"; src: url("/font.woff2") format("woff2"); font-weight: 700; }
+@font-face { font-family: "Montserrat"; src: url("/obs/montserrat.woff2") format("woff2"); font-weight: 400 700; }
+:root {
+  --main: #9600ff; --p200: #cf94ff; --p300: #b55cff; --p900: #26003f; --ink200: #c9c2d4; --ink400: #8e86a0;
+  --best: #b55cff; --pb: #3ddc84; --slow: #ffc93c; --bad: #ff4d6a; --panel: rgb(10 6 14 / .88);
+  --grad: linear-gradient(90deg, #0c0015 0%, #2b0050 55%, #5e00a1 100%);
+}
+* { box-sizing: border-box; margin: 0; }
+html, body { background: transparent; overflow: hidden; }
+body { font: 12px/1.3 Montserrat, "Segoe UI", sans-serif; color: var(--ink200); }
+b { color: #fff; font-weight: 700; }
+.d { font-family: "Good Timing", "Segoe UI", sans-serif; font-weight: 700; }
+.tab { font-variant-numeric: tabular-nums; }
+#zoom { transform-origin: 0 0; display: inline-block; padding: 2px; }
+.panel { overflow: hidden; border-radius: 8px; background: var(--panel); box-shadow: 0 0 0 1px rgb(255 255 255 / .06) inset; }
+.head { position: relative; display: flex; align-items: center; gap: 8px; overflow: hidden; background: var(--grad); }
+.pattern { position: absolute; inset: 0; opacity: .1; background: url("/obs/pattern.png") 0 0 / 640px repeat;
+  -webkit-mask-image: linear-gradient(90deg, transparent 35%, #000 85%); mask-image: linear-gradient(90deg, transparent 35%, #000 85%); }
+.stripes { position: absolute; top: 0; bottom: 0; right: -1.2rem; width: 5rem; transform: skewX(-18deg);
+  background: repeating-linear-gradient(90deg, rgb(255 255 255 / .07) 0 14px, transparent 14px 34px); }
+.kicker { position: relative; font-size: 10px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; color: var(--p200); }
+.pill { display: inline-block; min-width: 40px; border-radius: 4px; padding: 1px 8px; text-align: center; font-size: 11px; font-weight: 700; background: var(--p900); color: var(--p200); }
+.pill.p1 { background: var(--main); color: #fff; }
+
+/* Torre */
+.torre { width: 228px; }
+.torre .head { height: 34px; padding: 0 12px; }
+.torre .mark { position: relative; width: 16px; height: 13px; background: url("/logo.svg") center / contain no-repeat; }
+.torre .t { position: relative; font-size: 13px; color: #fff; text-transform: uppercase; }
+.torre .t i { font-style: normal; color: var(--p200); }
+.row { display: flex; align-items: center; gap: 8px; height: 24px; padding-right: 10px; border-top: 1px solid rgb(255 255 255 / .05); white-space: nowrap; }
+.row .cls { align-self: stretch; width: 3px; flex: none; }
+.row .pos { width: 24px; flex: none; text-align: center; font-size: 13px; color: var(--p300); }
+.row .nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-weight: 700; letter-spacing: .03em; color: #fff; }
+.row .nm.rare { color: var(--p200); }
+.row .up { font-size: 10px; font-weight: 700; color: var(--pb); }
+.row .gap { width: 48px; flex: none; text-align: right; }
+.row .gap.pit { font-weight: 700; color: var(--slow); }
+.row.focus { border-top-color: transparent; background: linear-gradient(90deg, var(--main), var(--p900) 85%); }
+.row.focus .pos, .row.focus .nm { color: #fff; }
+.row.focus .gap { font-weight: 700; color: #fff; }
+.sep { height: 3px; margin: 0 10px; background: repeating-linear-gradient(90deg, rgb(255 255 255 / .15) 0 3px, transparent 3px 6px); }
+
+/* Battaglia */
+.battaglia { width: 300px; border-radius: 12px; }
+.battaglia .head { height: 26px; padding: 0 12px; }
+.battaglia .body { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; }
+.battaglia .car { display: flex; align-items: center; gap: 8px; margin: 3px 0; }
+.battaglia .num { width: 28px; text-align: center; font-size: 13px; color: var(--p300); }
+.battaglia .who { font-size: 15px; color: #fff; text-transform: uppercase; }
+.battaglia .who.rare { color: var(--p200); }
+.battaglia .gapbig { display: block; font-size: 24px; line-height: 1; color: #fff; text-align: right; }
+.battaglia .gapbig small { font-size: 14px; }
+.battaglia .trend { display: block; margin-top: 4px; text-align: right; font-size: 11px; font-weight: 700; white-space: nowrap; }
+
+/* Barra del pilota */
+.pilota { display: flex; height: 64px; width: max-content; overflow: hidden; border-radius: 12px; border: 1px solid #2a2236; box-shadow: 0 8px 30px rgb(0 0 0 / .35); }
+.pilota .brand { position: relative; display: flex; align-items: center; width: 210px; padding: 0 16px; overflow: hidden; background: var(--grad); }
+.pilota .brand .stripes { width: 7rem; right: -2rem; }
+.pilota .logo { position: relative; width: 144px; height: 32px; background: url("/obs/logo.svg") left center / contain no-repeat; }
+.pilota .info { display: flex; align-items: center; gap: 20px; padding: 0 20px; background: rgb(23 16 31 / .95); }
+.pilota .big { font-size: 40px; line-height: 1; color: rgb(150 0 255 / .18); -webkit-text-stroke: 2px rgb(230 199 255 / .85); text-shadow: 0 0 24px rgb(150 0 255 / .45); }
+.pilota .name { display: block; font-size: 20px; color: #fff; text-transform: uppercase; }
+.pilota .sub { font-size: 9.5px; font-weight: 700; letter-spacing: .2em; text-transform: uppercase; color: var(--p200); }
+.pilota .kv { font-size: 14px; white-space: nowrap; }
+.pilota .kv span { color: var(--ink400); }
+.pilota .live { display: grid; place-items: center; padding: 0 16px; background: var(--main); color: #fff; font-size: 14px; }
+
+/* Delta e pedali per chi guarda */
+.guida { display: flex; align-items: stretch; gap: 8px; width: 300px; height: 64px; padding: 8px; border-radius: 12px; }
+.guida .dl { display: flex; width: 74px; flex-direction: column; align-items: center; justify-content: center; border-radius: 8px; background: rgb(255 255 255 / .04); }
+.guida .dl .kicker { font-size: 8.5px; letter-spacing: .15em; }
+.guida .dl b { font-size: 22px; line-height: 1; }
+.guida svg { flex: 1; height: 100%; }
+.guida .bars { display: flex; align-items: flex-end; gap: 3px; }
+.guida .bars span { position: relative; width: 6px; height: 100%; border-radius: 1px; background: rgb(255 255 255 / .1); }
+.guida .bars i { position: absolute; bottom: 0; left: 0; width: 100%; border-radius: 1px; }
+.guida .gear { display: flex; width: 44px; flex-direction: column; align-items: center; justify-content: center; }
+.guida .gear b:first-child { font-size: 28px; line-height: 1; color: var(--p200); }
+.guida .gear b:last-child { font-size: 11px; }
+
+/* Sponsor */
+.sponsor { width: 300px; border-radius: 12px; }
+.sponsor .top { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px 0; }
+.sponsor .dots { display: flex; gap: 4px; }
+.sponsor .dots i { width: 6px; height: 6px; border-radius: 50%; background: rgb(255 255 255 / .2); }
+.sponsor .dots i.on { background: var(--main); }
+.sponsor .logo { position: relative; height: 62px; }
+.sponsor .logo img { position: absolute; inset: 0 24px 8px; margin: auto; max-width: 200px; max-height: 44px; object-fit: contain; transition: opacity .6s; }
+</style>
+</head>
+<body>
+<div id="zoom"></div>
+<script>
+{
+  const SITE = "https://rare-project-motorsport.vercel.app";
+  const q = new URLSearchParams(location.search);
+  const page = location.pathname.replace(/^\/obs\/?/, "").split("/")[0] || "torre";
+  const DEMO = q.has("prova");
+  const scale = Number(q.get("scala") || 1.5);
+  const rowsMax = Math.max(4, Number(q.get("righe") || 10));
+  const sponsorSec = Number(q.get("secondi") || 8);
+  const battleMax = Number(q.get("soglia") || 1);
+  const zoom = document.getElementById("zoom");
+  zoom.style.transform = `scale(${scale})`;
+  const dash = "–";
+  const esc = (t) => String(t ?? "").replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+  const surname = (full) => { const p = String(full || "").trim().split(/\s+/); return p.length > 1 ? p.slice(1).join(" ") : p[0] || ""; };
+  function lapTime(s) {
+    if (!(s > 0)) return dash;
+    const m = Math.floor(s / 60);
+    const sec = (s - m * 60).toFixed(3).padStart(6, "0");
+    return m ? `${m}:${sec}` : sec;
+  }
+  const clock = (sec) => { const s = Math.max(0, Math.floor(sec)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60), r = s % 60; return h ? `${h}:${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}` : `${m}:${String(r).padStart(2, "0")}`; };
+
+  // ——— Dati: piloti (quando cambiano) e auto (10 volte al secondo; la guida 30) ———
+  let drivers = new Map(), start = new Map(), track = "", driversRev = -99;
+  let fast = null, slow = null, cars = [];
+  async function loadDrivers() {
+    try {
+      const d = DEMO ? demoDrivers() : await (await fetch("/obs/piloti", { cache: "no-store" })).json();
+      drivers = new Map(d.list.map((x) => [x.idx, x]));
+      start = new Map(Object.entries(d.start || {}).map(([k, v]) => [Number(k), v[1]]));
+      track = d.track || "";
+    } catch {}
+  }
+  async function poll() {
+    try {
+      const d = DEMO ? demoData(performance.now()) : await (await fetch("/obs/dati", { cache: "no-store" })).json();
+      fast = d.fast;
+      if (d.rest) { slow = d.rest.slow; cars = d.rest.cars || []; }
+      if (slow && slow.driversRev !== driversRev) { driversRev = slow.driversRev; await loadDrivers(); }
+    } catch { fast = null; }
+    render();
+    setTimeout(poll, page === "guida" ? 33 : 100);
+  }
+
+  /** Classifica della classe dell'auto inquadrata */
+  function standings(focusIdx) {
+    const cls = drivers.get(focusIdx)?.classId;
+    const list = cars.filter((c) => drivers.has(c.i) && (cls == null || drivers.get(c.i).classId === cls));
+    list.sort((a, b) => (a.cpos > 0 ? a.cpos : 999) - (b.cpos > 0 ? b.cpos : 999) || (a.best > 0 ? a.best : 1e9) - (b.best > 0 ? b.best : 1e9));
+    return list;
+  }
+  const isRace = () => slow?.session === "Race";
+  function gapTo(c, ref) {
+    if (!ref || c === ref) return dash;
+    if (isRace()) {
+      const laps = Math.floor(ref.lap + ref.pct - (c.lap + c.pct));
+      if (laps >= 1) return `+${laps} G`;
+      const g = c.f2 - ref.f2;
+      return g > 0 ? `+${g.toFixed(1)}` : dash;
+    }
+    return c.best > 0 && ref.best > 0 ? `+${(c.best - ref.best).toFixed(3)}` : dash;
+  }
+  const focusIdx = () => (fast && fast.cam >= 0 ? fast.cam : slow?.me ?? -1);
+  const live = () => fast && fast.connected && drivers.size && cars.length;
+
+  // ——— Le grafiche ———
+  const SESSION = { Practice: "Prove", "Open Qualify": "Qualifica", "Lone Qualify": "Qualifica", Qualify: "Qualifica", Warmup: "Warmup", Race: "Gara" };
+  function torre() {
+    if (!live()) return "";
+    const f = focusIdx();
+    const list = standings(f);
+    const k = list.findIndex((c) => c.i === f);
+    let idx = list.map((_, i) => i).slice(0, rowsMax);
+    if (k >= rowsMax) idx = [...idx.slice(0, rowsMax - 3), -1, k - 1, k];
+    const leader = list[0];
+    const title = slow?.lapsTotal ? `Giro ${Math.max(slow.lap, 0)}<i> / ${slow.lapsTotal}</i>` : isRace() && slow?.timeRemain != null ? clock(slow.timeRemain) : esc(SESSION[slow?.session] ?? slow?.session ?? "");
+    const rows = idx.map((i) => {
+      if (i < 0) return `<div class="sep"></div>`;
+      const c = list[i], d = drivers.get(c.i);
+      const st = start.get(c.i), chg = isRace() && st && c.cpos > 0 ? st - c.cpos : 0;
+      const gap = c.pit ? "PIT" : i === 0 ? (isRace() ? "Leader" : lapTime(c.best)) : gapTo(c, leader);
+      return `<div class="row tab${c.i === f ? " focus" : ""}"><span class="cls" style="background:${esc(d?.classColor) || "transparent"}"></span>
+        <span class="pos d">${c.cpos || i + 1}</span><span class="nm${d?.rare ? " rare" : ""}">${esc(surname(d?.full).toUpperCase())}</span>
+        ${chg > 0 ? `<span class="up">▲${chg}</span>` : ""}<span class="gap${c.pit ? " pit" : ""}">${gap}</span></div>`;
+    }).join("");
+    return `<div class="panel torre"><div class="head"><div class="pattern"></div><div class="stripes"></div><span class="mark"></span><span class="t d">${title}</span></div>${rows}</div>`;
+  }
+
+  // battaglia: l'auto inquadrata e quella davanti o dietro entro la soglia, con la variazione del distacco a giro
+  const battleHist = new Map();
+  function battaglia() {
+    if (!live() || !isRace()) return "";
+    const f = focusIdx();
+    const list = standings(f);
+    const k = list.findIndex((c) => c.i === f);
+    if (k < 0) return "";
+    const pair = (a, b) => (a && b && !a.pit && !b.pit && Math.abs(a.lap + a.pct - b.lap - b.pct) < 1 ? { front: a, rear: b, gap: b.f2 - a.f2 } : null);
+    const opts = [pair(list[k - 1], list[k]), pair(list[k], list[k + 1])].filter((p) => p && p.gap > 0 && p.gap <= battleMax);
+    if (!opts.length) return "";
+    const p = opts.sort((a, b) => a.gap - b.gap)[0];
+    const key = `${p.front.i}-${p.rear.i}`;
+    const h = battleHist.get(key) || { lap: p.rear.lapc, gap: p.gap, trend: null };
+    if (p.rear.lapc !== h.lap) { h.trend = p.gap - h.gap; h.lap = p.rear.lapc; h.gap = p.gap; }
+    battleHist.set(key, h);
+    const car = (c) => { const d = drivers.get(c.i); return `<div class="car"><span class="pill${c.cpos === 1 ? " p1" : ""}">P${c.cpos}</span><span class="num d">${esc(d?.number)}</span><span class="who d${d?.rare ? " rare" : ""}">${esc(surname(d?.full))}</span></div>`; };
+    const tr = h.trend == null || Math.abs(h.trend) < 0.05 ? "" : h.trend < 0 ? `<span class="trend" style="color:var(--pb)">▼ ${Math.abs(h.trend).toFixed(1)} a giro</span>` : `<span class="trend" style="color:var(--ink400)">▲ ${h.trend.toFixed(1)} a giro</span>`;
+    return `<div class="panel battaglia"><div class="head"><div class="stripes"></div><span class="kicker">Battaglia per la P${p.front.cpos}</span></div>
+      <div class="body"><div>${car(p.front)}${car(p.rear)}</div><div><span class="gapbig d tab">${p.gap.toFixed(1)}<small>s</small></span>${tr}</div></div></div>`;
+  }
+
+  function pilota() {
+    if (!live()) return "";
+    const f = focusIdx();
+    const d = drivers.get(f);
+    const list = standings(f);
+    const k = list.findIndex((c) => c.i === f);
+    const c = list[k];
+    if (!d || !c) return "";
+    const fastest = Math.min(...list.map((x) => (x.best > 0 ? x.best : Infinity)));
+    const ahead = list[k - 1];
+    const gap = isRace() && ahead ? `<span class="kv tab">Distacco <b>${gapTo(c, ahead)}</b> <span>da ${esc(surname(drivers.get(ahead.i)?.full))}</span></span>` : "";
+    return `<div class="pilota"><div class="brand"><div class="pattern"></div><div class="stripes"></div><span class="logo"></span></div>
+      <div class="info"><span class="big d">${esc(d.number)}</span><div><span class="name d">${esc(surname(d.full))}</span><span class="sub">${esc([d.car, track].filter(Boolean).join(" · "))}</span></div>
+      ${c.cpos > 0 ? `<span class="pill${c.cpos === 1 ? " p1" : ""}">P${c.cpos}</span>` : ""}
+      <span class="kv tab">Ultimo <b>${lapTime(c.last)}</b></span>
+      <span class="kv tab">Migliore <b style="color:${c.best > 0 && c.best === fastest ? "var(--best)" : "#fff"}">${lapTime(c.best)}</b></span>${gap}</div>
+      <div class="live d">Live</div></div>`;
+  }
+
+  // delta e pedali: solo quando l'inquadratura è sulla tua auto (i pedali si leggono solo dalla tua)
+  const N = 120, hist = { t: [], b: [] };
+  function guida() {
+    if (!fast || !fast.connected || !slow || focusIdx() !== slow.me) return "";
+    const push = (a, v) => { a.push(v); if (a.length > N) a.shift(); };
+    push(hist.t, fast.throttle);
+    push(hist.b, fast.brake);
+    const pts = (a) => a.map((v, i) => `${i + N - a.length},${(46 - v * 42).toFixed(1)}`).join(" ");
+    const d = fast.deltaBest;
+    const tone = d == null ? "var(--ink400)" : d < 0 ? "var(--pb)" : "var(--bad)";
+    const gear = fast.gear === -1 ? "R" : fast.gear === 0 ? "N" : fast.gear;
+    return `<div class="panel guida"><div class="dl"><span class="kicker">Delta</span><b class="d tab" style="color:${tone}">${d == null ? dash : (d > 0 ? "+" : d < 0 ? "-" : "") + Math.abs(d).toFixed(2)}</b></div>
+      <svg viewBox="0 0 ${N} 48" preserveAspectRatio="none"><polyline fill="none" stroke="var(--pb)" stroke-width="2" vector-effect="non-scaling-stroke" points="${pts(hist.t)}"/><polyline fill="none" stroke="var(--bad)" stroke-width="2" vector-effect="non-scaling-stroke" points="${pts(hist.b)}"/></svg>
+      <div class="bars"><span><i style="height:${fast.brake * 100}%;background:var(--bad)"></i></span><span><i style="height:${fast.throttle * 100}%;background:var(--pb)"></i></span></div>
+      <div class="gear"><b class="d">${gear}</b><b class="tab">${Math.round(fast.speedKmh)}</b></div></div>`;
+  }
+
+  // ——— Sponsor: loghi della pagina Partner del sito, uno alla volta ———
+  async function sponsor() {
+    let list = [];
+    try { list = (await (await fetch(`${SITE}/api/partners`, { cache: "no-store" })).json()).partners || []; } catch {}
+    if (!list.length) { setTimeout(sponsor, 60000); return; }
+    zoom.innerHTML = `<div class="panel sponsor"><div class="top"><span class="kicker">Partner</span><span class="dots">${list.map(() => "<i></i>").join("")}</span></div><div class="logo">${list.map((p) => `<img alt="${esc(p.name)}" src="${esc(p.logo)}" style="opacity:0">`).join("")}</div></div>`;
+    const imgs = [...zoom.querySelectorAll(".logo img")], dots = [...zoom.querySelectorAll(".dots i")];
+    let i = -1;
+    const next = () => {
+      i = (i + 1) % list.length;
+      imgs.forEach((im, k) => (im.style.opacity = k === i ? "1" : "0"));
+      dots.forEach((d, k) => d.classList.toggle("on", k === i));
+    };
+    next();
+    setInterval(next, sponsorSec * 1000);
+    // ogni ora si rilegge l'elenco (nuovi partner aggiunti al sito)
+    setTimeout(() => location.reload(), 3600 * 1000);
+  }
+
+  let last = "";
+  function render() {
+    const html = { torre, battaglia, pilota, guida }[page]?.() ?? "";
+    if (html === last) return;
+    last = html;
+    zoom.innerHTML = html;
+  }
+
+  // ——— Dati di esempio (?prova) ———
+  const NAMES = ["Luca Bianchi", "Pierre Dubois", "Klaus Müller", "Sam Lee", "Marco Rossi", "Gianluca Giampuzzo", "John Smith", "Rui Costa", "Nassim Bouaouni", "Tom Berg", "Adam Kowal", "Erik Lind"];
+  function demoDrivers() {
+    return { rev: -1, track: "Spa-Francorchamps", start: { 5: [11, 11], 3: [7, 7] },
+      list: NAMES.map((full, i) => ({ idx: i, full, number: String([7, 12, 41, 22, 14, 28, 3, 31, 98, 55, 77, 19][i]), classId: 1, classColor: "#f5c242", rare: i === 5 || i === 8, car: "BMW M4 GT3" })) };
+  }
+  function demoData(t) {
+    const ph = (t / 4000) % 1;
+    return {
+      fast: { connected: true, cam: 5, throttle: ph < 0.55 ? 1 : ph < 0.7 ? 0 : Math.min(1, (ph - 0.7) * 4), brake: ph >= 0.55 && ph < 0.68 ? 1 - (ph - 0.55) * 6 : 0, gear: ph < 0.55 ? 5 : 3, speedKmh: ph < 0.55 ? 212 : 128, deltaBest: -0.21 + Math.sin(t / 2500) * 0.15 },
+      rest: { slow: { session: "Race", lap: 14, lapsTotal: 20, me: 5, driversRev: -1, timeRemain: 640 },
+        cars: NAMES.map((_, i) => ({ i, cpos: i + 1, lap: 14, lapc: 13 + (Math.floor(t / 20000) % 2), pct: 0.5 - i * 0.01, f2: [0, 1.4, 4, 6.2, 7.9, 8.5, 9.9, 11, 12.4, 14.2, 16, 18][i] + (i === 5 ? Math.sin(t / 5000) * 0.2 : 0), last: 105.6 + i * 0.13, best: i === 0 ? 105.21 : 105.39 + i * 0.07, pit: i === 8 })) },
+    };
+  }
+
+  if (page === "sponsor") sponsor();
+  else poll();
+}
+</script>
+</body>
+</html>

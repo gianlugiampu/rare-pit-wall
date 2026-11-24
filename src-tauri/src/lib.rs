@@ -852,6 +852,10 @@ pub fn run() {
             *shared.engineer.lock().unwrap() = eng_settings;
             // P3: cruscotto sul telefono (mini sito sulla rete di casa)
             *shared.dash_url.lock().unwrap() = dash::start(shared.dash.clone());
+            // P8.5: porta del mini sito per gli indirizzi delle grafiche OBS
+            if let Some(port) = shared.dash_url.lock().unwrap().as_deref().and_then(|u| u.rsplit(':').next()).and_then(|p| p.parse().ok()) {
+                overlay::set_obs_port(port);
+            }
             start_reader(app.handle().clone(), shared.clone());
             // P8: overlay in gioco, con i tasti rapidi Ctrl+Maiusc+O (mostra/nascondi) e Ctrl+Maiusc+M (sposta/blocca)
             overlay::init(app.handle());

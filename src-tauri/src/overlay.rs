@@ -342,6 +342,8 @@ struct Fast {
     delta_last: Option<f32>,
     /// CarLeftRight: 2 auto a sinistra, 3 a destra, 4 ai due lati, 5 due a sinistra, 6 due a destra
     car_lr: i32,
+    /// P8.5: auto inquadrata dalla telecamera di iRacing (le grafiche per la diretta seguono lei)
+    cam: i32,
 }
 
 /// Dati lenti (4 volte al secondo): giri, tempi, benzina, sessione
@@ -408,6 +410,8 @@ pub struct Driver {
     team: String,
     flair: String,
     rare: bool,
+    /// P8.5: nome dell'auto (barra del pilota nelle dirette)
+    car: String,
 }
 
 #[derive(Serialize, Clone, Default)]
@@ -417,6 +421,8 @@ pub struct Drivers {
     list: Vec<Driver>,
     /// griglia di partenza: auto -> (posizione, posizione di classe), da 1
     start: BTreeMap<usize, (i32, i32)>,
+    /// P8.5: pista (barra del pilota nelle dirette)
+    track: String,
 }
 
 static DRIVERS: LazyLock<Mutex<Drivers>> = LazyLock::new(Default::default);
@@ -494,6 +500,7 @@ fn parse_drivers(yaml: &str, rev: i32) -> Drivers {
             team: g("TeamName").to_string(),
             flair: g("FlairName").to_string(),
             rare: cust > 0 && team.contains(&cust),
+            car: g("CarScreenName").to_string(),
         });
     }
     let mut start = BTreeMap::new();
@@ -503,7 +510,8 @@ fn parse_drivers(yaml: &str, rev: i32) -> Drivers {
             start.insert(idx as usize, (pos + 1, cpos + 1));
         }
     }
-    Drivers { rev, list, start }
+    let track = irsdk::yaml_value(yaml, "TrackDisplayName", None).unwrap_or_default();
+    Drivers { rev, list, start, track }
 }
 
 #[derive(Serialize)]
@@ -565,6 +573,7 @@ fn start_reader(app: AppHandle) {
                     fast.delta_session = ok(s, "LapDeltaToSessionBestLap_OK").then(|| f(s, "LapDeltaToSessionBestLap"));
                     fast.delta_last = ok(s, "LapDeltaToSessionLastlLap_OK").then(|| f(s, "LapDeltaToSessionLastlLap"));
                     fast.car_lr = s.get("CarLeftRight").map(|v| v.as_i32()).unwrap_or(0);
+                    fast.cam = s.get("CamCarIdx").map(|v| v.as_i32()).unwrap_or(-1);
                     if s.session_info_update() != info_rev {
                         info_rev = s.session_info_update();
                         let yaml = s.session_info();
@@ -640,8 +649,11 @@ fn start_reader(app: AppHandle) {
             if changed {
                 sync(&app);
             }
-            let open = KINDS.iter().any(|k| app.get_webview_window(&label(k.id)).is_some());
-            let need_cars = tick % 6 == 0 && ["relative", "classifica"].iter().any(|id| app.get_webview_window(&label(id)).is_some());
+            let windows = KINDS.iter().any(|k| app.get_webview_window(&label(k.id)).is_some());
+            // P8.5: una pagina per OBS ha chiesto i dati negli ultimi 5 secondi
+            let obs = OBS_SEEN.lock().unwrap().map(|t| t.elapsed() < Duration::from_secs(5)).unwrap_or(false);
+            let open = windows || obs;
+            let need_cars = tick % 6 == 0 && (obs || ["relative", "classifica"].iter().any(|id| app.get_webview_window(&label(id)).is_some()));
             let mut cars: Vec<Car> = vec![];
             if let (true, Some(s)) = (need_cars && fast.connected, sdk.as_mut()) {
                 let gi = |s: &mut irsdk::Irsdk, k: &str, i: usize| s.get_at(k, i).map(|v| v.as_i32()).unwrap_or(0);
@@ -664,9 +676,17 @@ fn start_reader(app: AppHandle) {
                     });
                 }
             }
-            if open {
+            if windows {
                 let frame = Frame { fast: &fast, slow: (tick % 15 == 0).then_some(&slow), cars: need_cars.then_some(&cars) };
                 let _ = app.emit_filter("ov-data", &frame, is_overlay_target);
+            }
+            if obs {
+                if tick % 2 == 0 {
+                    *OBS_FAST.lock().unwrap() = serde_json::to_string(&fast).unwrap_or_default();
+                }
+                if need_cars {
+                    *OBS_REST.lock().unwrap() = serde_json::json!({ "slow": &slow, "cars": &cars }).to_string();
+                }
             }
             tick = tick.wrapping_add(1);
             std::thread::sleep(Duration::from_millis(if open { 16 } else { 250 }));
@@ -676,6 +696,42 @@ fn start_reader(app: AppHandle) {
             }
         }
     });
+}
+
+// ——— P8.5 · Grafiche per la diretta (pagine per le «sorgenti browser» di OBS) ———
+// Le serve il mini sito del cruscotto (dash.rs) all'indirizzo http://localhost:<porta>/obs/<grafica>.
+
+static OBS_SEEN: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+static OBS_FAST: Mutex<String> = Mutex::new(String::new());
+static OBS_REST: Mutex<String> = Mutex::new(String::new());
+static OBS_PORT: Mutex<u16> = Mutex::new(0);
+
+const OBS_PAGE: &str = include_str!("../obs/index.html");
+const OBS_MONTSERRAT: &[u8] = include_bytes!("../../src/assets/montserrat-latin.woff2");
+const OBS_PATTERN: &[u8] = include_bytes!("../../src/assets/pattern-white.png");
+const OBS_LOGO: &str = include_str!("../../src/assets/logo-white.svg");
+
+/// Porta del mini sito (la sceglie dash.rs all'avvio): serve per gli indirizzi da copiare in OBS
+pub fn set_obs_port(port: u16) {
+    *OBS_PORT.lock().unwrap() = port;
+}
+
+/// Risposta del mini sito per gli indirizzi /obs/…: (tipo, contenuto)
+pub fn obs_http(path: &str) -> Option<(&'static str, Vec<u8>)> {
+    let rest = path.strip_prefix("/obs")?;
+    Some(match rest.trim_start_matches('/') {
+        "dati" => {
+            *OBS_SEEN.lock().unwrap() = Some(std::time::Instant::now());
+            let (f, r) = (OBS_FAST.lock().unwrap().clone(), OBS_REST.lock().unwrap().clone());
+            let body = format!("{{\"fast\":{},\"rest\":{}}}", if f.is_empty() { "null" } else { &f }, if r.is_empty() { "null" } else { &r });
+            ("application/json", body.into_bytes())
+        }
+        "piloti" => ("application/json", serde_json::to_vec(&*DRIVERS.lock().unwrap()).unwrap_or_default()),
+        "montserrat.woff2" => ("font/woff2", OBS_MONTSERRAT.to_vec()),
+        "pattern.png" => ("image/png", OBS_PATTERN.to_vec()),
+        "logo.svg" => ("image/svg+xml", OBS_LOGO.as_bytes().to_vec()),
+        _ => ("text/html; charset=utf-8", OBS_PAGE.as_bytes().to_vec()),
+    })
 }
 
 /// P8.4 · messaggio del team dal pit wall: compare nel «Box del pit wall» (se acceso)
@@ -742,6 +798,8 @@ pub struct OverlayState {
     kinds: Vec<serde_json::Value>,
     monitors: String,
     has_layout: bool,
+    /// P8.5: indirizzo base delle grafiche per OBS (vuoto se il mini sito non è partito)
+    obs_base: String,
 }
 
 #[tauri::command]
@@ -754,6 +812,10 @@ pub fn overlay_state(app: AppHandle) -> OverlayState {
         hidden: st.hidden,
         kinds: items().into_iter().map(|id| serde_json::json!({ "id": id, "name": KINDS.iter().find(|k| k.item == id).map(|k| k.name).unwrap_or(id) })).collect(),
         has_layout: st.settings.layouts.contains_key(&key),
+        obs_base: match *OBS_PORT.lock().unwrap() {
+            0 => String::new(),
+            port => format!("http://localhost:{port}/obs/"),
+        },
         monitors: key,
     }
 }

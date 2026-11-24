@@ -23,3 +23,11 @@ input[type=range] { accent-color: var(--main); }
 .ov-detail .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 0 16px; }
 .val { width: 44px; text-align: right; color: #fff; font-weight: 700; font-variant-numeric: tabular-nums; }
 .ov-off { opacity: .45; pointer-events: none; }
+.ov-obs { padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); }
+.ov-obs .small b { color: #fff; }
+.obs-list { list-style: none; padding: 0; margin: 10px 0; }
+.obs-list li { display: grid; grid-template-columns: 150px 1fr auto auto; align-items: center; gap: 10px; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.obs-list li b { color: #fff; }
+.obs-list li em { display: block; font-style: normal; font-size: 11px; color: var(--ink400); }
+.obs-list code { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--p300); font-size: 12px; user-select: text; }
+.obs-list button { padding: 6px 12px; margin: 0; font-size: 12px; }

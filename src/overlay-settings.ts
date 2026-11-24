@@ -2,11 +2,51 @@
 // Ogni modifica si salva subito e si vede subito sugli overlay aperti.
 
 import { invoke } from "@tauri-apps/api/core";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen } from "@tauri-apps/api/event";
 import { DEFS, ITEM_DEFAULT, opt, type Config, type Item } from "./overlay-defs";
 
 type Settings = { enabled: boolean; show: string; items: Record<string, Item> };
-type State = { settings: Settings; edit: boolean; hidden: boolean; kinds: { id: string; name: string }[]; monitors: string; hasLayout: boolean };
+type State = { settings: Settings; edit: boolean; hidden: boolean; kinds: { id: string; name: string }[]; monitors: string; hasLayout: boolean; obsBase: string };
+
+// P8.5 · grafiche per la diretta: indirizzo e misura consigliata della sorgente browser (diretta 1920×1080, scala 1.5)
+const OBS: [string, string, string][] = [
+  ["torre", "Torre classifica", "360 × 560"],
+  ["battaglia", "Battaglia tra due auto", "470 × 170"],
+  ["pilota", "Barra del pilota", "1500 × 110"],
+  ["guida", "Delta e pedali", "470 × 110"],
+  ["sponsor", "Sponsor a ciclo", "470 × 160"],
+];
+
+function renderObs() {
+  const ul = $("obs");
+  ul.innerHTML = "";
+  if (!st.obsBase) {
+    ul.innerHTML = `<li><span class="small">Il mini sito del programma non è partito (porte 8765–8775 occupate): riavvia Rare Pit Wall.</span></li>`;
+    return;
+  }
+  for (const [path, name, size] of OBS) {
+    const url = st.obsBase + path;
+    const li = document.createElement("li");
+    li.innerHTML = `<span><b></b><em></em></span><code></code><button type="button" class="ghost">Copia</button><button type="button" class="ghost">Prova</button>`;
+    li.querySelector("b")!.textContent = name;
+    li.querySelector("em")!.textContent = `misura ${size}`;
+    li.querySelector("code")!.textContent = url;
+    const [copy, test] = li.querySelectorAll("button");
+    copy.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(url);
+        copy.textContent = "Copiato ✓";
+        setTimeout(() => (copy.textContent = "Copia"), 1500);
+      } catch {
+        copy.textContent = "Selezionalo a mano";
+      }
+    });
+    // apre la grafica nel browser con i dati di esempio, per vedere com'è
+    test.addEventListener("click", () => openUrl(`${url}?prova`));
+    ul.append(li);
+  }
+}
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const IN_APP = "__TAURI_INTERNALS__" in window;
@@ -18,7 +58,7 @@ const SOON: [string, string][] = [
 
 let st: State = {
   settings: { enabled: false, show: "pista", items: {} },
-  edit: false, hidden: false, kinds: Object.keys(DEFS).map((id) => ({ id, name: DEFS[id].name })), monitors: "", hasLayout: false,
+  edit: false, hidden: false, kinds: Object.keys(DEFS).map((id) => ({ id, name: DEFS[id].name })), monitors: "", hasLayout: false, obsBase: "http://localhost:8765/obs/",
 };
 let sel = "delta";
 
@@ -182,4 +222,5 @@ window.addEventListener("DOMContentLoaded", async () => {
   renderGeneral();
   renderList();
   renderDetail();
+  renderObs();
 });
