@@ -643,6 +643,21 @@ fn cancel_clips() {
     clips::cancel();
 }
 
+/// P6b · clip già registrate (momento → file)
+#[tauri::command]
+fn clip_files() -> std::collections::BTreeMap<String, String> {
+    clips::files()
+}
+
+/// P6b · manda la clip di un momento su Discord (webhook del canale, impostato sul sito)
+#[tauri::command]
+async fn send_clip(app: AppHandle, key: String, text: String) -> Result<String, String> {
+    let token = load_config(&app).token.ok_or("PC non collegato al sito")?;
+    let v: serde_json::Value = http().get(format!("{SITE}/api/pitwall/me")).bearer_auth(token).send().await.map_err(|_| "Sito non raggiungibile".to_string())?.json().await.unwrap_or_default();
+    let webhook = v["clipsWebhook"].as_str().filter(|s| s.starts_with("https://")).ok_or("Il canale Discord per le clip non è ancora impostato sul sito.")?.to_string();
+    clips::send_to_discord(key, text, webhook).await
+}
+
 /// Apre la cartella dei video di iRacing
 #[tauri::command]
 fn open_videos() {
@@ -824,7 +839,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(shared.clone())
-        .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto, get_moments, jump_to_moment, export_clips, clip_status, cancel_clips, open_videos,
+        .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto, get_moments, jump_to_moment, export_clips, clip_status, cancel_clips, open_videos, clip_files, send_clip,
             overlay::overlay_state, overlay::overlay_save, overlay::overlay_edit, overlay::overlay_reset, overlay::overlay_open_settings, overlay::overlay_hello, overlay::overlay_drivers, overlay::overlay_map, overlay::overlay_map_dir])
         .setup(move |app| {
             // Parte con Windows (si può togliere da Impostazioni → App → Avvio)
@@ -877,6 +892,10 @@ pub fn run() {
                 *shared.voice_status.lock().unwrap() = voice::VoiceStatus { state: "pronta".into(), percent: 100, message: "Voce Serena pronta".into() };
             }
             *shared.engineer.lock().unwrap() = eng_settings;
+            // P6b: cartella dati per l'elenco delle clip e ffmpeg
+            if let Ok(d) = app.path().app_local_data_dir() {
+                clips::set_data_dir(d);
+            }
             // P3: cruscotto sul telefono (mini sito sulla rete di casa)
             *shared.dash_url.lock().unwrap() = dash::start(shared.dash.clone());
             // P8.5: porta del mini sito per gli indirizzi delle grafiche OBS

@@ -42,7 +42,7 @@ pub fn installed(dir: &Path) -> bool {
 }
 
 /// Scarica un file mostrando l'avanzamento e controllando l'impronta
-async fn download(url: &str, sha: &str, to: &Path, status: &Arc<Mutex<VoiceStatus>>, from: u8, span: u8) -> Result<(), String> {
+pub(crate) async fn download(url: &str, sha: &str, to: &Path, status: &Arc<Mutex<VoiceStatus>>, from: u8, span: u8) -> Result<(), String> {
     let client = reqwest::Client::builder().build().map_err(|e| e.to_string())?;
     let mut res = client.get(url).send().await.map_err(|_| "rete non raggiungibile".to_string())?;
     if !res.status().is_success() {

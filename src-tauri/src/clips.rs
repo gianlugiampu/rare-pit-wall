@@ -19,6 +19,9 @@ pub const AFTER: f64 = 10.0;
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipJob {
+    /// chiave del momento (per ritrovare il file e mandarlo su Discord)
+    #[serde(default)]
+    pub key: String,
     pub t: f64,
     pub car_number: String,
 }
@@ -112,6 +115,41 @@ fn wait(d: Duration) -> bool {
     true
 }
 
+// ——— File delle clip: momento → video registrato da iRacing ———
+static FILES: Mutex<Option<std::collections::BTreeMap<String, String>>> = Mutex::new(None);
+static DATA_DIR: Mutex<Option<std::path::PathBuf>> = Mutex::new(None);
+
+/// Cartella dati del programma (per l'elenco delle clip e ffmpeg)
+pub fn set_data_dir(dir: std::path::PathBuf) {
+    *DATA_DIR.lock().unwrap() = Some(dir);
+}
+fn files_path() -> Option<std::path::PathBuf> {
+    DATA_DIR.lock().unwrap().as_ref().map(|d| d.join("clip-files.json"))
+}
+
+/// Clip già registrate (solo quelle il cui file c'è ancora)
+pub fn files() -> std::collections::BTreeMap<String, String> {
+    let mut f = FILES.lock().unwrap();
+    if f.is_none() {
+        *f = Some(files_path().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default());
+    }
+    f.as_ref().unwrap().iter().filter(|(_, p)| std::path::Path::new(p).exists()).map(|(k, v)| (k.clone(), v.clone())).collect()
+}
+fn remember(key: &str, path: &std::path::Path) {
+    let mut all = files();
+    all.insert(key.to_string(), path.to_string_lossy().to_string());
+    if let Some(p) = files_path() {
+        let _ = std::fs::write(p, serde_json::to_string(&all).unwrap_or_default());
+    }
+    *FILES.lock().unwrap() = Some(all);
+}
+fn video_files() -> std::collections::HashSet<std::path::PathBuf> {
+    videos_dir()
+        .and_then(|d| std::fs::read_dir(d).ok())
+        .map(|r| r.flatten().map(|e| e.path()).filter(|p| p.extension().map(|x| x == "mp4" || x == "avi").unwrap_or(false)).collect())
+        .unwrap_or_default()
+}
+
 /// Esporta le clip in sottofondo; lo stato si legge con `status()`
 pub fn export(session_num: i32, jobs: Vec<ClipJob>, camera: String) {
     if STATUS.lock().unwrap().running {
@@ -158,13 +196,19 @@ pub fn export(session_num: i32, jobs: Vec<ClipJob>, camera: String) {
                 break;
             }
             set(|s| s.message = format!("Clip {} di {}: registro…", k + 1, s.total));
+            let before = video_files();
             broadcast(VIDEO_CAPTURE, VIDEO_START, 0);
             broadcast(REPLAY_SET_PLAY_SPEED, 1, 0);
             let ok = wait(Duration::from_secs_f64(BEFORE + AFTER));
             broadcast(VIDEO_CAPTURE, VIDEO_END, 0);
             broadcast(REPLAY_SET_PLAY_SPEED, 0, 0);
-            // tempo a iRacing per chiudere il file
+            // tempo a iRacing per chiudere il file; poi il file nuovo è la clip di questo momento
             std::thread::sleep(Duration::from_millis(1500));
+            if let Some(newest) = video_files().difference(&before).max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok()) {
+                if !job.key.is_empty() {
+                    remember(&job.key, newest);
+                }
+            }
             if !ok {
                 break;
             }
@@ -180,6 +224,105 @@ pub fn export(session_num: i32, jobs: Vec<ClipJob>, camera: String) {
             }
         });
     });
+}
+
+// ——— Discord (facoltativo): copia compressa sotto i 10 MB, mandata al webhook del canale ———
+// ffmpeg 9.1 «essentials» (gyan.dev, build ufficiale per Windows), scaricato una volta sola nella cartella dati
+const FFMPEG_URL: &str = "https://www.gyan.dev/ffmpeg/builds/packages/ffmpeg-9.1-essentials_build.zip";
+const FFMPEG_SHA: &str = "b9bbbb3acece000cbeec994f856649354e52c773807841e78908374b24d658fd";
+
+fn ffmpeg_exe() -> Option<std::path::PathBuf> {
+    DATA_DIR.lock().unwrap().as_ref().map(|d| d.join("ffmpeg").join("ffmpeg.exe"))
+}
+
+/// Scarica ffmpeg se manca (la prima volta), con l'avanzamento nel messaggio delle clip
+async fn ensure_ffmpeg() -> Result<std::path::PathBuf, String> {
+    let exe = ffmpeg_exe().ok_or("cartella dati non disponibile")?;
+    if exe.exists() {
+        return Ok(exe);
+    }
+    let dir = exe.parent().unwrap().to_path_buf();
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let zip_path = dir.join("ffmpeg.zip");
+    let st = std::sync::Arc::new(Mutex::new(crate::voice::VoiceStatus::default()));
+    let watch = st.clone();
+    let done = std::sync::Arc::new(AtomicBool::new(false));
+    let stop = done.clone();
+    // l'avanzamento del download finisce nel messaggio delle clip
+    std::thread::spawn(move || {
+        while !stop.load(Ordering::Relaxed) {
+            let p = watch.lock().unwrap().percent;
+            set(|s| s.message = format!("Preparo la compressione per Discord (una volta sola, ~114 MB): {p}%"));
+            std::thread::sleep(Duration::from_millis(500));
+        }
+    });
+    let res = crate::voice::download(FFMPEG_URL, FFMPEG_SHA, &zip_path, &st, 0, 100).await;
+    done.store(true, Ordering::Relaxed);
+    res?;
+    // dallo zip serve solo bin/ffmpeg.exe
+    let file = std::fs::File::open(&zip_path).map_err(|e| e.to_string())?;
+    let mut archive = zip::ZipArchive::new(file).map_err(|e| e.to_string())?;
+    let name = (0..archive.len())
+        .filter_map(|i| archive.by_index(i).ok().map(|f| f.name().to_string()))
+        .find(|n| n.ends_with("/bin/ffmpeg.exe"))
+        .ok_or("ffmpeg.exe non trovato nello zip")?;
+    let mut entry = archive.by_name(&name).map_err(|e| e.to_string())?;
+    let mut out = std::fs::File::create(&exe).map_err(|e| e.to_string())?;
+    std::io::copy(&mut entry, &mut out).map_err(|e| e.to_string())?;
+    drop(out);
+    let _ = std::fs::remove_file(&zip_path);
+    Ok(exe)
+}
+
+/// Copia a 720p e bitrate calcolato per stare sotto i 10 MB (15 s di clip)
+fn compress(ffmpeg: &std::path::Path, input: &str, kbps: u32) -> Result<std::path::PathBuf, String> {
+    let out = std::env::temp_dir().join(format!("rare-clip-{}.mp4", std::process::id()));
+    let mut cmd = std::process::Command::new(ffmpeg);
+    cmd.args(["-y", "-i", input, "-vf", "scale=-2:'min(720,ih)',fps=30", "-c:v", "libx264", "-preset", "veryfast"])
+        .args(["-b:v", &format!("{kbps}k"), "-maxrate", &format!("{kbps}k"), "-bufsize", &format!("{}k", kbps * 2)])
+        .args(["-c:a", "aac", "-b:a", "96k", "-movflags", "+faststart"])
+        .arg(&out)
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // nessuna finestra nera
+    }
+    let ok = cmd.status().map(|s| s.success()).unwrap_or(false);
+    if ok && out.exists() { Ok(out) } else { Err("compressione non riuscita".into()) }
+}
+
+/// Manda la clip di un momento al canale Discord del team (webhook dato dal sito)
+pub async fn send_to_discord(key: String, text: String, webhook: String) -> Result<String, String> {
+    let input = files().get(&key).cloned().ok_or("Clip non trovata: esportala di nuovo.")?;
+    set(|s| s.message = "Preparo la clip per Discord…".into());
+    let ffmpeg = ensure_ffmpeg().await?;
+    set(|s| s.message = "Comprimo la clip…".into());
+    // prima a 4,5 Mbit/s, se ancora troppo grande a 2,5
+    let mut out = None;
+    for kbps in [4500u32, 2500] {
+        let (f, i) = (ffmpeg.clone(), input.clone());
+        let p = tauri::async_runtime::spawn_blocking(move || compress(&f, &i, kbps)).await.map_err(|e| e.to_string())??;
+        if std::fs::metadata(&p).map(|m| m.len()).unwrap_or(u64::MAX) < 9_800_000 {
+            out = Some(p);
+            break;
+        }
+    }
+    let out = out.ok_or("La clip resta sopra i 10 MB anche compressa.")?;
+    set(|s| s.message = "Mando la clip su Discord…".into());
+    let bytes = std::fs::read(&out).map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_file(&out);
+    let form = reqwest::multipart::Form::new()
+        .text("payload_json", serde_json::json!({ "content": text }).to_string())
+        .part("files[0]", reqwest::multipart::Part::bytes(bytes).file_name("clip.mp4").mime_str("video/mp4").map_err(|e| e.to_string())?);
+    let res = reqwest::Client::new().post(&webhook).multipart(form).timeout(Duration::from_secs(120)).send().await.map_err(|_| "Discord non raggiungibile".to_string())?;
+    if res.status().is_success() {
+        set(|s| s.message = "✓ Clip mandata su Discord".into());
+        Ok("✓ Mandata".into())
+    } else {
+        Err(format!("Discord ha rifiutato la clip ({})", res.status()))
+    }
 }
 
 /// Cartella dove iRacing salva i video (Documenti\iRacing\videos, anche con Documenti su OneDrive)

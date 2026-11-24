@@ -62,6 +62,7 @@ footer { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line);
 .mom-list li span { flex: 1; min-width: 0; }
 .mom-list li b { color: #fff; }
 .mom-list button { padding: 4px 10px; font-size: 11px; }
+.mom-list button.ghost { margin: 0; padding: 3px 8px; }
 .eng { margin-top: 14px; padding: 10px 12px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
 .eng summary { cursor: pointer; color: #fff; font-weight: 700; }
 .eng .row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; }

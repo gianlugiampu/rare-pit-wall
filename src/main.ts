@@ -29,6 +29,8 @@ async function loadMoments() {
   }
   $("mom-head").textContent = `${r.track} · ${r.moments.length} momenti`;
   list.innerHTML = "";
+  // P6b: momenti che hanno già la clip registrata → pulsante «Discord»
+  const files = await invoke<Record<string, string>>("clip_files");
   for (const m of r.moments) {
     const li = document.createElement("li");
     // P6b: casella per scegliere i momenti da trasformare in clip
@@ -37,6 +39,7 @@ async function loadMoments() {
     cb.className = "clip-pick";
     cb.dataset.t = String(m.t);
     cb.dataset.car = m.carNumber;
+    cb.dataset.key = m.key;
     li.append(cb);
     const span = document.createElement("span");
     span.innerHTML = `${ICON[m.kind] ?? "•"} giro ${m.lap} · <b></b> `;
@@ -46,6 +49,24 @@ async function loadMoments() {
     btn.textContent = "Vai";
     btn.addEventListener("click", () => invoke("jump_to_moment", { sessionNum: r.sessionNum, t: m.t, carNumber: m.carNumber }));
     li.append(span, btn);
+    if (files[m.key]) {
+      const d = document.createElement("button");
+      d.className = "ghost";
+      d.textContent = "Discord";
+      d.title = "Manda la clip di questo momento sul canale Discord del team";
+      d.addEventListener("click", async () => {
+        d.disabled = true;
+        d.textContent = "Invio…";
+        try {
+          d.textContent = await invoke<string>("send_clip", { key: m.key, text: `🎬 **${m.car}** · giro ${m.lap} · ${m.text} · ${r.track}` });
+        } catch (err) {
+          d.textContent = "Riprova";
+          d.disabled = false;
+          $("clip-msg").textContent = String(err);
+        }
+      });
+      li.append(d);
+    }
     list.append(li);
   }
 }
@@ -190,10 +211,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     if (!s.running && clipTimer) {
       clearInterval(clipTimer);
       clipTimer = undefined;
+      loadMoments(); // compaiono i pulsanti «Discord» delle clip appena registrate
     }
   };
   $("clip-go").addEventListener("click", async () => {
-    const jobs = picks().filter((c) => c.checked).map((c) => ({ t: Number(c.dataset.t), carNumber: c.dataset.car ?? "" }));
+    const jobs = picks().filter((c) => c.checked).map((c) => ({ key: c.dataset.key ?? "", t: Number(c.dataset.t), carNumber: c.dataset.car ?? "" }));
     if (!lastRace || !jobs.length) {
       $("clip-msg").textContent = "Spunta almeno un momento.";
       return;
