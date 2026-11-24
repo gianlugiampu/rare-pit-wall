@@ -7,6 +7,7 @@ mod controls;
 mod dash;
 mod engineer;
 mod irsdk;
+mod laprec;
 mod live;
 mod moments;
 mod overlay;
@@ -220,6 +221,19 @@ fn live_send(app: &AppHandle, shared: Arc<Shared>, body: serde_json::Value) {
     });
 }
 
+/// Giri di una sessione per Analisi (tutte le auto del team, anche fuori calendario)
+fn send_session(app: &AppHandle, body: serde_json::Value) {
+    let Some(token) = load_config(app).token else { return };
+    tauri::async_runtime::spawn(async move {
+        let res = http().post(format!("{SITE}/api/pitwall/session")).bearer_auth(token.clone()).timeout(Duration::from_secs(30)).json(&body).send().await;
+        match res {
+            Ok(r) if r.status().is_success() => {}
+            Ok(r) => site_log(Some(token), format!("giri della sessione non salvati: {}", r.status())),
+            Err(_) => {}
+        }
+    });
+}
+
 /// Messaggio nel registro di diagnosi del sito (se il PC è abbinato): così si vede cosa succede senza screenshot
 fn site_log(token: Option<String>, message: String) {
     let Some(token) = token else { return };
@@ -292,6 +306,8 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
         // P6: momenti salienti della gara
         let mut detector = moments::Detector::default();
         let mut moments_sent_at: Option<std::time::Instant> = None;
+        // giri di tutte le sessioni per Analisi
+        let mut laprec: Option<laprec::LapRec> = None;
         loop {
             if sdk.is_none() {
                 sdk = irsdk::Irsdk::open();
@@ -320,6 +336,9 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         tracker.on_session_info(&yaml);
                         let team_ids = shared.team_ids.lock().unwrap().clone();
                         detector.on_session_info(&yaml, &team_ids, tracker.car_idx.max(0) as usize);
+                        if let Some(r) = laprec.as_mut() {
+                            r.update_info(&yaml, &team_ids);
+                        }
                         cur_yaml = yaml;
                     }
                     // nuova sessione (controllata a ogni lettura: iRacing può cambiare sessione qualche istante dopo aver
@@ -345,9 +364,23 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         } else {
                             detector.race.subsession = 0;
                         }
+                        // Analisi: si chiudono i giri della sessione finita e si parte con la nuova
+                        if let Some(mut r) = laprec.take() {
+                            if let Some(body) = r.take_body(true) {
+                                send_session(&app, body);
+                            }
+                        }
+                        let team_ids = shared.team_ids.lock().unwrap().clone();
+                        laprec = Some(laprec::LapRec::start(&cur_yaml, subsession.parse().unwrap_or(0), &session, &team_ids, tracker.car_idx.max(0) as usize));
                         fetch_team(&app, shared.clone());
                         *shared.live_event.lock().unwrap() = None;
                         live_probe(&app, shared.clone(), subsession.parse().unwrap_or(0), session.clone());
+                    }
+                    if let Some(r) = laprec.as_mut() {
+                        r.tick(s);
+                        if let Some(body) = r.take_body(false) {
+                            send_session(&app, body);
+                        }
                     }
                     // Classifica ufficiale della gara: si manda subito, una volta sola per gara
                     let key = format!("{subsession}-{session_num}");
@@ -532,6 +565,12 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                     send_moments(&app, shared.clone(), detector.race.clone(), true);
                 }
                 live_key.clear();
+                if let Some(mut r) = laprec.take() {
+                    if let Some(body) = r.take_body(true) {
+                        send_session(&app, body);
+                        site_log(load_config(&app).token, format!("sessione chiusa: {} giri mandati ad Analisi", r.lap_count()));
+                    }
+                }
                 if let Some((key, yaml, num)) = pending.take() {
                     if sent.insert(key) {
                         send_results(&app, shared.clone(), yaml, num, false);
