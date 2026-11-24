@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
-const SITE = "https://rare-project-motorsport.vercel.app";
+const SITE = "https://rareprojectmotorsport.com";
 
 type Status = {
   iracing: boolean; onTrack: boolean; track: string; car: string; session: string;

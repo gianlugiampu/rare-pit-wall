@@ -21,7 +21,7 @@ use tauri::{
     AppHandle, Emitter, Manager, WindowEvent,
 };
 
-pub const SITE: &str = "https://rare-project-motorsport.vercel.app";
+pub const SITE: &str = "https://rareprojectmotorsport.com";
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
 // Icone vicino all'orologio: senza pallino = in attesa di iRacing, pallino verde = collegato a iRacing
