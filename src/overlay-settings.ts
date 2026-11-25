@@ -1,4 +1,4 @@
-// P8 · Finestra delle impostazioni degli overlay: accesi/spenti, quando si vedono, trasparenza, grandezza e informazioni.
+// P8 · Impostazioni degli overlay (scheda «Overlay» e comandi rapidi nella scheda «Voce» della finestra unica, P15): accesi/spenti, quando si vedono, trasparenza, grandezza e informazioni.
 // Ogni modifica si salva subito e si vede subito sugli overlay aperti.
 
 import { invoke } from "@tauri-apps/api/core";
@@ -267,7 +267,7 @@ function renderDetail() {
   if (d.fields.length) box.append(k2, grid);
 }
 
-window.addEventListener("DOMContentLoaded", async () => {
+export async function initOverlaySettings() {
   if (IN_APP) {
     st = await invoke<State>("overlay_state");
     // la modalità «sposta» si può cambiare anche con il tasto rapido o dal menu dell'icona
@@ -300,4 +300,4 @@ window.addEventListener("DOMContentLoaded", async () => {
   renderObs();
   renderControls();
   if (IN_APP) await listen("controls-changed", () => renderControls());
-});
+}

@@ -10,10 +10,10 @@ export default defineConfig(() => ({
   //
   // 1. prevent Vite from obscuring rust errors
   clearScreen: false,
-  // P8: tre pagine (finestrella, overlay, impostazioni degli overlay)
+  // P8/P15: due pagine (finestra unica con le schede, overlay)
   build: {
     rollupOptions: {
-      input: { main: "index.html", overlay: "overlay.html", impostazioni: "overlay-impostazioni.html" },
+      input: { main: "index.html", overlay: "overlay.html" },
     },
   },
   // 2. tauri expects a fixed port, fail if that port is not available

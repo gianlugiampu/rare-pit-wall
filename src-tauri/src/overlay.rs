@@ -278,7 +278,7 @@ pub fn sync(app: &AppHandle) {
 fn is_overlay_target(t: &EventTarget) -> bool {
     match t {
         EventTarget::WebviewWindow { label } | EventTarget::Webview { label } | EventTarget::Window { label } => {
-            label.starts_with("ov-") || label == SETTINGS_LABEL
+            label.starts_with("ov-") || label == SETTINGS_LABEL || label == "main"
         }
         _ => false,
     }
@@ -866,20 +866,14 @@ pub fn shortcuts() -> (tauri_plugin_global_shortcut::Shortcut, tauri_plugin_glob
     )
 }
 
-/// Finestra delle impostazioni degli overlay (a parte, più grande della finestrella)
+/// Impostazioni degli overlay: dalla 0.15 sono la scheda «Overlay» della finestra unica (P15)
 pub fn open_settings(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window(SETTINGS_LABEL) {
+    if let Some(w) = app.get_webview_window("main") {
         let _ = w.unminimize();
         let _ = w.show();
         let _ = w.set_focus();
-        return;
+        let _ = w.emit("show-tab", "overlay");
     }
-    let _ = WebviewWindowBuilder::new(app, SETTINGS_LABEL, WebviewUrl::App("overlay-impostazioni.html".into()))
-        .title("Rare Pit Wall · Overlay")
-        .inner_size(780.0, 640.0)
-        .min_inner_size(680.0, 520.0)
-        .center()
-        .build();
 }
 
 /// Chiusa la finestra delle impostazioni: se gli overlay erano in «sposta», si bloccano e si salvano le posizioni

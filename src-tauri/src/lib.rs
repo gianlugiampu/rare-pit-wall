@@ -1015,6 +1015,8 @@ pub fn run() {
                 if w.label() == "main" {
                     api.prevent_close();
                     let _ = w.hide();
+                    // overlay in «sposta»: chiudendo la finestra si bloccano e si salvano le posizioni
+                    overlay::on_settings_closed(w.app_handle());
                 }
             }
             if let WindowEvent::Destroyed = e {

@@ -3,8 +3,7 @@
   "identifier": "overlay",
   "description": "Finestre degli overlay e delle loro impostazioni",
   "windows": [
-    "ov-*",
-    "overlay-impostazioni"
+    "ov-*"
   ],
   "permissions": [
     "core:default",

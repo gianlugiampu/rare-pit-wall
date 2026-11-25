@@ -79,3 +79,45 @@ footer { margin-top: 18px; padding-top: 12px; border-top: 1px solid var(--line);
 .clip-cam select { background: var(--dark); color: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 4px; font: inherit; }
 .mom-list input[type=checkbox] { accent-color: var(--main); width: 15px; height: 15px; margin: 0; flex: none; }
 .ghost { margin-top: 12px; background: transparent; border: 1px solid var(--main); padding: 8px 14px; }
+
+/* P15 · una sola finestra con le schede a sinistra */
+body:has(#main:not([hidden])) { display: flex; flex-direction: column; overflow: hidden; }
+.pair { max-width: 460px; }
+.bar .pill { margin-left: 18px; display: flex; align-items: center; gap: 8px; min-width: 0; padding: 4px 12px; border-radius: 99px; background: rgba(0, 0, 0, .35); font-size: 12px; color: #fff; font-weight: 700; }
+.bar .pill span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bar .pill i { width: 9px; height: 9px; border-radius: 50%; background: var(--ink600); flex: none; }
+.app { flex: 1; min-height: 0; display: grid; grid-template-columns: 190px 1fr; }
+.side { border-right: 1px solid var(--line); background: #0f0519; padding: 12px 10px; display: flex; flex-direction: column; gap: 4px; overflow-y: auto; }
+.tab { display: flex; align-items: center; gap: 10px; width: 100%; padding: 10px 12px; border-radius: 8px; border: 1px solid transparent; background: none; color: #cfc8d8; font: 700 13px Montserrat, "Segoe UI", sans-serif; text-align: left; cursor: pointer; }
+.tab svg { width: 18px; height: 18px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tab:hover { background: rgba(150, 0, 255, .08); }
+.tab.sel { background: rgba(150, 0, 255, .18); border-color: var(--main); color: #fff; }
+.tab .dot { margin-left: auto; width: 7px; height: 7px; border-radius: 50%; background: var(--pb); }
+.tab .n { margin-left: auto; font-size: 11px; background: var(--main); color: #fff; border-radius: 99px; padding: 0 7px; }
+.tab.soon, .tab.soon:hover { color: var(--ink600); cursor: default; background: none; }
+.side .sep { margin: 10px 4px 4px; font-size: 10px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink600); font-weight: 700; }
+.side .foot { margin-top: auto; padding: 8px 4px 0; font-size: 11px; color: var(--ink400); border-top: 1px solid var(--line); }
+.side .foot b, .w { color: #fff; }
+.panes { min-width: 0; overflow-y: auto; }
+.pane { display: none; padding: 18px 20px; }
+.pane.sel { display: block; }
+.pane h2 { font-size: 20px; margin-bottom: 4px; }
+.box { margin-top: 12px; padding: 12px 14px; background: var(--card); border: 1px solid var(--line); border-radius: 8px; }
+.box .live-row + .cols2 { margin-top: 4px; }
+.cols2 { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px; }
+.pane .row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; }
+.pane .row input[type=checkbox] { accent-color: var(--main); width: 16px; height: 16px; margin: 0; }
+.subtabs { display: flex; gap: 6px; margin: 10px 0 12px; border-bottom: 1px solid var(--line); }
+.subtabs button { background: none; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 8px 12px; color: var(--ink400); }
+.subtabs button.sel { color: #fff; border-color: var(--main); }
+.sub { display: none; flex-direction: column; gap: 14px; }
+.sub.sel { display: flex; }
+.btns { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 12px; }
+.btns button { margin: 0; padding: 8px 14px; }
+.kbd { display: inline-block; padding: 0 7px; border: 1px solid var(--ink600); border-radius: 5px; font-size: 11px; color: var(--p300); }
+.soonbox { margin-top: 12px; padding: 12px 14px; border: 1px dashed var(--ink600); border-radius: 8px; }
+.soonbox .k { color: var(--ink400); }
+.tag { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; padding: 1px 6px; border-radius: 4px; background: var(--ink600); color: #fff; margin-left: 6px; }
+.pane .dash { margin-top: 8px; border: 0; padding: 0; background: none; }
+.pane .live-box { margin-top: 12px; }
+.pane .ghost { margin-top: 10px; }

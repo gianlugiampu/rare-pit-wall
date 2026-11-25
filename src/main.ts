@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { initOverlaySettings } from "./overlay-settings";
 
 const SITE = "https://rareprojectmotorsport.com";
 
@@ -21,6 +22,9 @@ async function loadMoments() {
   const r = await invoke<RaceMoments | null>("get_moments");
   lastRace = r;
   $("clips").hidden = !r || !r.moments.length;
+  const badge = $("tab-mom");
+  badge.hidden = !r || !r.moments.length;
+  badge.textContent = String(r?.moments.length ?? 0);
   const list = $("mom-list");
   if (!r || !r.moments.length) {
     $("mom-head").textContent = "Nessuna gara ancora: i momenti si segnano da soli durante le gare.";
@@ -86,7 +90,9 @@ const SESSION: Record<string, string> = {
 function showPaired(paired: boolean, driver: string | null) {
   $("pair").hidden = paired;
   $("main").hidden = !paired;
+  $("pill").hidden = !paired;
   $("driver").textContent = driver || "pilota";
+  $("driver2").textContent = driver || "pilota";
   if (!paired) $<HTMLInputElement>("code").focus();
 }
 
@@ -102,6 +108,7 @@ function render(s: Status) {
   res.textContent = s.result ?? "";
   res.className = s.result && !s.result.startsWith("✓") && !s.result.startsWith("Invio") ? "msg err" : "msg ok";
   const dot = $("dot");
+  $("tab-live").hidden = !s.iracing;
   if (!s.iracing) {
     dot.style.background = "var(--ink600)";
     $("st-text").textContent = "In attesa di iRacing";
@@ -122,7 +129,23 @@ function render(s: Status) {
   $("v-gear").textContent = s.gear === -1 ? "R" : s.gear === 0 ? "N" : String(s.gear);
 }
 
+/** P15 · schede della finestra unica */
+function showTab(id: string) {
+  document.querySelectorAll<HTMLElement>(".tab[data-tab]").forEach((t) => t.classList.toggle("sel", t.dataset.tab === id));
+  document.querySelectorAll<HTMLElement>(".pane").forEach((p) => p.classList.toggle("sel", p.id === `pane-${id}`));
+  if (id === "replay") loadMoments();
+}
+
 window.addEventListener("DOMContentLoaded", async () => {
+  document.querySelectorAll<HTMLElement>(".tab[data-tab]").forEach((t) => t.addEventListener("click", () => showTab(t.dataset.tab!)));
+  document.querySelectorAll<HTMLButtonElement>(".subtabs button").forEach((b) =>
+    b.addEventListener("click", () => {
+      b.parentElement!.querySelectorAll("button").forEach((x) => x.classList.toggle("sel", x === b));
+      b.closest(".pane")!.querySelectorAll<HTMLElement>(".sub").forEach((s) => s.classList.toggle("sel", s.id === b.dataset.sub));
+    }),
+  );
+  // menu dell'icona vicino all'orologio («Overlay in gioco…») → si apre la scheda giusta
+  listen<string>("show-tab", (e) => showTab(e.payload));
   const st = await invoke<AppState>("get_state");
   $("ver").textContent = `v${st.version}`;
   // Cruscotto sul telefono: QR code dell'indirizzo sulla rete di casa (SVG generato dal programma)
@@ -224,10 +247,9 @@ window.addEventListener("DOMContentLoaded", async () => {
     clipTimer = window.setInterval(showClips, 500);
     showClips();
   });
-  // Momenti dell'ultima gara: si caricano quando si apre il riquadro
-  $("mom").addEventListener("toggle", () => {
-    if (($("mom") as HTMLDetailsElement).open) loadMoments();
-  });
+  // Momenti dell'ultima gara: subito (per il numero sulla scheda) e ogni volta che si apre la scheda Replay
+  loadMoments();
+  initOverlaySettings();
   // Pit wall: interruttore a mano e accensione automatica nelle gare del calendario
   $<HTMLInputElement>("live-auto").checked = st.liveAuto;
   $("live-auto").addEventListener("change", (e) => invoke("set_live_auto", { on: (e.target as HTMLInputElement).checked }));
@@ -241,14 +263,12 @@ window.addEventListener("DOMContentLoaded", async () => {
       invoke("set_live_auto", { on: false });
     }
   });
-  // P8: impostazioni degli overlay in una finestra a parte
-  $("open-overlay").addEventListener("click", () => invoke("overlay_open_settings"));
+  $("open-site").addEventListener("click", () => openUrl(`${SITE}/app`));
   $("open-profile").addEventListener("click", (e) => {
     e.preventDefault();
     openUrl(`${SITE}/app/profilo#pitwall`);
   });
-  $("unpair").addEventListener("click", async (e) => {
-    e.preventDefault();
+  $("unpair").addEventListener("click", async () => {
     if (!confirm("Scollegare questo PC dal tuo account? Potrai ricollegarlo con un nuovo codice.")) return;
     await invoke("unpair");
     showPaired(false, null);

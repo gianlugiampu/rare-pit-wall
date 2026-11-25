@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <link rel="stylesheet" href="/src/styles.css" />
+    <link rel="stylesheet" href="/src/overlay-settings.css" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Rare Pit Wall</title>
     <script type="module" src="/src/main.ts" defer></script>
@@ -11,11 +12,12 @@
     <header class="bar">
       <img src="/src/assets/r-mark.svg" alt="" />
       <b class="d">RARE PIT WALL</b>
+      <span class="pill" id="pill" hidden><i id="dot"></i><span id="st-text">In attesa di iRacing</span></span>
       <span id="ver" class="ver"></span>
     </header>
 
     <!-- 1 · Abbinamento -->
-    <section id="pair" hidden>
+    <section id="pair" class="pair" hidden>
       <p class="k">Primo avvio</p>
       <h1 class="d">Collega il tuo account</h1>
       <p class="txt">Nell'area piloti apri <b>Profilo → Rare Pit Wall</b>, premi «Crea codice» e scrivilo qui.</p>
@@ -27,94 +29,204 @@
       <a href="#" id="open-profile" class="link">Apri il Profilo nel browser ↗</a>
     </section>
 
-    <!-- 2 · In attesa / 3 · In pista -->
-    <section id="main" hidden>
-      <div class="st"><i id="dot"></i><span id="st-text">In attesa di iRacing</span></div>
-      <div id="waiting">
-        <p class="txt">Ciao <b id="driver"></b>. Apri iRacing ed entra in una sessione: il resto parte da solo.</p>
-        <div class="feats">
-          <div class="feat"><span>Collegamento al sito</span><em>attivo</em></div>
-          <div class="feat"><span>Risultati automatici</span><em>attivo</em></div>
-          <div class="feat"><span>Cruscotto sul telefono</span><em>attivo</em></div>
-          <div class="feat"><span>Ingegnere a voce</span><em>attivo</em></div>
-          <div class="feat"><span>Pit wall dal vivo</span><em>attivo</em></div>
-        </div>
-      </div>
-      <div id="live" hidden>
-        <div class="kv">
-          <div>Giro<b id="v-lap">–</b></div>
-          <div>Posizione<b id="v-pos">–</b></div>
-          <div>Benzina<b id="v-fuel">–</b></div>
-          <div>Incidenti<b id="v-inc">–</b></div>
-          <div>Velocità<b id="v-speed">–</b></div>
-          <div>Marcia<b id="v-gear">–</b></div>
-        </div>
-      </div>
-      <div id="dash" class="dash" hidden>
-        <div id="qr" class="qr"></div>
-        <div>
-          <p class="k">Cruscotto sul telefono</p>
-          <p class="small">Inquadra il codice con il telefono (stessa Wi-Fi del PC), poi gira il telefono in orizzontale.</p>
-          <p id="dash-url" class="url"></p>
-        </div>
-      </div>
-      <div class="live-box">
-        <label class="live-row"><span>Pit wall in diretta</span><input type="checkbox" id="live-manual" class="switch" /></label>
-        <label class="row small-row"><input type="checkbox" id="live-auto" /> Accendi da solo nelle gare del calendario</label>
-        <p id="live-text" class="small"></p>
-        <ul id="live-msgs" class="live-msgs"></ul>
-      </div>
-      <p id="result" class="msg ok" hidden></p>
-      <details id="mom" class="eng">
-        <summary>Momenti dell'ultima gara</summary>
-        <p id="mom-head" class="small"></p>
-        <ul id="mom-list" class="mom-list"></ul>
-        <p class="small">Apri il replay della gara su iRacing, poi premi «Vai»: il replay salta lì (5 secondi prima) e inquadra l'auto.</p>
-        <div id="clips" class="clips" hidden>
-          <p class="k">Clip video</p>
-          <p class="small">Spunta i momenti e premi «Esporta»: con il replay aperto, iRacing registra 5 secondi prima e 10 dopo ogni momento.
-            Serve la registrazione video attiva nelle opzioni di iRacing.</p>
-          <div class="clip-row">
-            <a href="#" id="clip-all" class="link">Tutti</a> · <a href="#" id="clip-none" class="link">Nessuno</a>
-            <label class="clip-cam">Inquadratura
-              <select id="clip-cam">
-                <option value="tv">TV</option>
-                <option value="inseguimento">Inseguimento</option>
-                <option value="cockpit">Cockpit</option>
-                <option value="elicottero">Elicottero</option>
-              </select>
-            </label>
+    <!-- 2 · Programma: una sola finestra con le schede (P15) -->
+    <div id="main" class="app" hidden>
+      <nav class="side">
+        <button type="button" class="tab sel" data-tab="pista">
+          <svg viewBox="0 0 24 24"><path d="M4 18c3-8 13-8 16 0" /><path d="M12 18l4-6" /></svg>In pista<span id="tab-live" class="dot" hidden></span>
+        </button>
+        <button type="button" class="tab" data-tab="overlay">
+          <svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2" /><rect x="6" y="8" width="6" height="4" /></svg>Overlay
+        </button>
+        <button type="button" class="tab" data-tab="voce">
+          <svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3" /><path d="M5 11a7 7 0 0 0 14 0M12 18v3" /></svg>Voce
+        </button>
+        <button type="button" class="tab" data-tab="replay">
+          <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 3-6.2" /><path d="M4 4v4h4" /><path d="M10 9l5 3-5 3z" /></svg>Replay<span id="tab-mom" class="n" hidden></span>
+        </button>
+        <button type="button" class="tab" data-tab="coll">
+          <svg viewBox="0 0 24 24"><path d="M10 14a4 4 0 0 0 6 0l3-3a4 4 0 0 0-6-6l-1 1" /><path d="M14 10a4 4 0 0 0-6 0l-3 3a4 4 0 0 0 6 6l1-1" /></svg>Collegamento
+        </button>
+        <p class="sep">In arrivo</p>
+        <span class="tab soon"><svg viewBox="0 0 24 24"><path d="M3 17l6-6 4 4 8-8" /></svg>Coach</span>
+        <span class="tab soon"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8" /><path d="M12 8v4l3 2" /></svg>Stratega</span>
+        <div class="foot">Ciao <b id="driver"></b><br />Chiudendo la finestra il programma resta vicino all'orologio.</div>
+      </nav>
+
+      <main class="panes">
+        <!-- IN PISTA -->
+        <section class="pane sel" id="pane-pista">
+          <h2 class="d">In pista</h2>
+          <div id="waiting">
+            <p class="small">Apri iRacing ed entra in una sessione: il resto parte da solo.</p>
           </div>
-          <div class="clip-row">
-            <button type="button" id="clip-go">Esporta clip</button>
-            <button type="button" id="clip-stop" class="ghost" hidden>Annulla</button>
-            <button type="button" id="clip-dir" class="ghost">Apri cartella</button>
+          <div id="live" hidden>
+            <p class="small">Quello che succede adesso.</p>
+            <div class="kv">
+              <div>Giro<b id="v-lap">–</b></div>
+              <div>Posizione<b id="v-pos">–</b></div>
+              <div>Benzina<b id="v-fuel">–</b></div>
+              <div>Incidenti<b id="v-inc">–</b></div>
+              <div>Velocità<b id="v-speed">–</b></div>
+              <div>Marcia<b id="v-gear">–</b></div>
+            </div>
           </div>
-          <p id="clip-msg" class="small"></p>
-        </div>
-      </details>
-      <details id="eng" class="eng">
-        <summary>Ingegnere a voce</summary>
-        <label class="row"><input type="checkbox" id="e-enabled" /> Attivo</label>
-        <label class="field">Voce <select id="e-voice"></select></label>
-        <p id="v-status" class="small"></p>
-        <button type="button" id="v-install" class="ghost" hidden>Scarica la voce Serena</button>
-        <label class="field">Volume <input type="range" id="e-volume" min="0" max="100" step="5" /></label>
-        <p class="small">Cosa dire (in gara; in prova e qualifica solo tempo e delta):</p>
-        <label class="row"><input type="checkbox" id="e-laptime" /> Tempo del giro e delta</label>
-        <label class="row"><input type="checkbox" id="e-fuel" /> Benzina e box</label>
-        <label class="row"><input type="checkbox" id="e-gaps" /> Distacchi</label>
-        <label class="row"><input type="checkbox" id="e-flags" /> Bandiere</label>
-        <label class="row"><input type="checkbox" id="e-race" /> Info gara (posizioni, giri alla fine, incidenti)</label>
-        <button type="button" id="e-test" class="ghost">Prova la voce</button>
-        <p class="small">Voce Serena: Piper (MIT) e dataset «serena-synthetic-it» (CC-BY 4.0).</p>
-        <p class="small">Non parla con auto affiancate e solo in rettilineo, per non sovrapporsi allo spotter di iRacing.</p>
-      </details>
-      <button type="button" id="open-overlay" class="ghost wide">Overlay in gioco…</button>
-      <footer>
-        <span>Chiudendo la finestra il programma resta attivo vicino all'orologio.</span>
-        <a href="#" id="unpair" class="link">Scollega questo PC</a>
-      </footer>
-    </section>
+          <div class="live-box">
+            <label class="live-row"><span>Pit wall in diretta</span><input type="checkbox" id="live-manual" class="switch" /></label>
+            <label class="row small-row"><input type="checkbox" id="live-auto" /> Accendi da solo nelle gare del calendario</label>
+            <p id="live-text" class="small"></p>
+            <ul id="live-msgs" class="live-msgs"></ul>
+          </div>
+          <p id="result" class="msg ok" hidden></p>
+        </section>
+
+        <!-- OVERLAY -->
+        <section class="pane" id="pane-overlay">
+          <h2 class="d">Overlay</h2>
+          <div class="subtabs">
+            <button type="button" class="sel" data-sub="ov-gioco">In gioco</button>
+            <button type="button" data-sub="ov-diretta">Per la diretta (OBS)</button>
+          </div>
+          <div class="sub sel" id="ov-gioco">
+            <section class="ov-general">
+              <label class="live-row"><span>Overlay attivi</span><input type="checkbox" id="g-enabled" class="switch" /></label>
+              <label class="field">Quando si vedono
+                <select id="g-show">
+                  <option value="pista">Solo quando sei in macchina</option>
+                  <option value="iracing">Con iRacing aperto (anche nei replay)</option>
+                  <option value="sempre">Sempre</option>
+                </select>
+              </label>
+              <div class="ov-buttons">
+                <button type="button" id="g-edit">Sposta gli overlay</button>
+                <button type="button" id="g-reset" class="ghost">Rimetti al posto di partenza</button>
+              </div>
+              <p id="g-edit-hint" class="small" hidden>Trascina gli overlay dove vuoi (anche sugli altri monitor), poi premi «Blocca e salva».</p>
+              <p class="small">Tasti rapidi, anche dentro iRacing: <span class="kbd">Ctrl+Maiusc+O</span> mostra/nasconde · <span class="kbd">Ctrl+Maiusc+M</span> sposta/blocca.</p>
+              <p class="small">iRacing deve essere in <b>finestra a schermo intero</b> (opzioni grafiche → «Borderless»), non in schermo intero esclusivo. In VR gli overlay non si vedono.</p>
+              <p id="g-monitors" class="small"></p>
+            </section>
+            <div class="ov-cols">
+              <ul id="list" class="ov-list"></ul>
+              <section id="detail" class="ov-detail"></section>
+            </div>
+          </div>
+          <div class="sub" id="ov-diretta">
+            <section class="ov-obs">
+              <p class="small">In OBS aggiungi una <b>sorgente browser</b> per ogni grafica che vuoi, con questo indirizzo e la misura indicata
+                (diretta 1920×1080). Funzionano anche con gli overlay spenti, basta che Rare Pit Wall sia aperto. Seguono l'auto inquadrata in iRacing.</p>
+              <ul id="obs" class="obs-list"></ul>
+              <p class="small">Opzioni da aggiungere in fondo all'indirizzo: <b>?scala=1</b> più piccole (1.5 di base) · <b>?righe=15</b> righe della torre ·
+                <b>?secondi=12</b> tempo di ogni logo sponsor · <b>?soglia=2</b> distacco per la battaglia · <b>?prova</b> dati di esempio. Più opzioni insieme con «&amp;».</p>
+            </section>
+          </div>
+        </section>
+
+        <!-- VOCE -->
+        <section class="pane" id="pane-voce">
+          <h2 class="d">Voce</h2>
+          <p class="small">Serena, l'ingegnere in cuffia: cosa dice da sola e cosa le chiedi con un tasto.</p>
+          <div id="eng" class="box">
+            <label class="live-row"><span>Serena parla da sola</span><input type="checkbox" id="e-enabled" class="switch" /></label>
+            <div class="cols2">
+              <div>
+                <label class="field">Voce <select id="e-voice"></select></label>
+                <p id="v-status" class="small"></p>
+                <button type="button" id="v-install" class="ghost" hidden>Scarica la voce Serena</button>
+                <label class="field">Volume <input type="range" id="e-volume" min="0" max="100" step="5" /></label>
+                <button type="button" id="e-test" class="ghost">Prova la voce</button>
+              </div>
+              <div>
+                <p class="small">Cosa dire (in gara; in prova e qualifica solo tempo e delta):</p>
+                <label class="row"><input type="checkbox" id="e-laptime" /> Tempo del giro e delta</label>
+                <label class="row"><input type="checkbox" id="e-fuel" /> Benzina e box</label>
+                <label class="row"><input type="checkbox" id="e-gaps" /> Distacchi</label>
+                <label class="row"><input type="checkbox" id="e-flags" /> Bandiere</label>
+                <label class="row"><input type="checkbox" id="e-race" /> Info gara (posizioni, giri alla fine, incidenti)</label>
+              </div>
+            </div>
+            <p class="small">Non parla con auto affiancate e solo in rettilineo, per non sovrapporsi allo spotter di iRacing.
+              Voce Serena: Piper (MIT) e dataset «serena-synthetic-it» (CC-BY 4.0).</p>
+          </div>
+          <section class="ov-obs box">
+            <p class="k">Comandi rapidi</p>
+            <p class="small">Assegna un tasto del <b>volante / button box</b> o della <b>tastiera</b>: Serena ti risponde subito in cuffia,
+              anche in gara. Il comando del delta cambia il riferimento a ogni pressione (tuo migliore → migliore della sessione → ultimo giro).</p>
+            <ul id="ctl" class="obs-list ctl-list"></ul>
+            <p id="ctl-dev" class="small"></p>
+          </section>
+          <div class="soonbox">
+            <p class="k">Comandi a voce <span class="tag">in arrivo</span></p>
+            <p class="small">Tieni premuto un tasto del volante, fai la domanda, lascia il tasto: «quanta benzina ho?», «chi ho dietro?». Funzionerà senza internet.</p>
+          </div>
+        </section>
+
+        <!-- REPLAY -->
+        <section class="pane" id="pane-replay">
+          <h2 class="d">Replay</h2>
+          <p class="small">I momenti dell'ultima gara, per rivederli nel replay di iRacing e farne clip.</p>
+          <div class="box">
+            <p id="mom-head" class="k"></p>
+            <ul id="mom-list" class="mom-list"></ul>
+            <p class="small">Apri il replay della gara su iRacing, poi premi «Vai»: il replay salta lì (5 secondi prima) e inquadra l'auto.</p>
+          </div>
+          <div id="clips" class="box" hidden>
+            <p class="k">Clip video</p>
+            <p class="small">Spunta i momenti e premi «Esporta»: con il replay aperto, iRacing registra 5 secondi prima e 10 dopo ogni momento.
+              Serve la registrazione video attiva nelle opzioni di iRacing.</p>
+            <div class="clip-row">
+              <a href="#" id="clip-all" class="link">Tutti</a> · <a href="#" id="clip-none" class="link">Nessuno</a>
+              <label class="clip-cam">Inquadratura
+                <select id="clip-cam">
+                  <option value="tv">TV</option>
+                  <option value="inseguimento">Inseguimento</option>
+                  <option value="cockpit">Cockpit</option>
+                  <option value="elicottero">Elicottero</option>
+                </select>
+              </label>
+            </div>
+            <div class="clip-row">
+              <button type="button" id="clip-go">Esporta clip</button>
+              <button type="button" id="clip-stop" class="ghost" hidden>Annulla</button>
+              <button type="button" id="clip-dir" class="ghost">Apri cartella</button>
+            </div>
+            <p id="clip-msg" class="small"></p>
+          </div>
+        </section>
+
+        <!-- COLLEGAMENTO -->
+        <section class="pane" id="pane-coll">
+          <h2 class="d">Collegamento</h2>
+          <p class="small">Sito del team, telefono e funzioni attive.</p>
+          <div class="cols2">
+            <div class="box">
+              <p class="k">Account</p>
+              <p class="small">Collegato come <b id="driver2" class="w"></b></p>
+              <div class="feats">
+                <div class="feat"><span>Collegamento al sito</span><em>attivo</em></div>
+                <div class="feat"><span>Risultati e giri in Analisi</span><em>attivo</em></div>
+                <div class="feat"><span>Cruscotto sul telefono</span><em>attivo</em></div>
+                <div class="feat"><span>Ingegnere a voce</span><em>attivo</em></div>
+                <div class="feat"><span>Pit wall dal vivo</span><em>attivo</em></div>
+              </div>
+              <div class="btns">
+                <button type="button" id="open-site" class="ghost">Apri il sito</button>
+                <button type="button" id="unpair" class="ghost">Scollega questo PC</button>
+              </div>
+            </div>
+            <div class="box">
+              <p class="k">Cruscotto sul telefono</p>
+              <div id="dash" class="dash" hidden>
+                <div id="qr" class="qr"></div>
+                <div>
+                  <p class="small">Inquadra il codice con il telefono (stessa Wi-Fi del PC), poi gira il telefono in orizzontale.</p>
+                  <p id="dash-url" class="url"></p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </section>
+      </main>
+    </div>
   </body>
 </html>
