@@ -122,3 +122,13 @@ body:has(#main:not([hidden])) { display: flex; flex-direction: column; overflow:
 .pane .dash { margin-top: 8px; border: 0; padding: 0; background: none; }
 .pane .live-box { margin-top: 12px; }
 .pane .ghost { margin-top: 10px; }
+/* F42 · controllo prima della gara */
+.pc-list { list-style: none; padding: 0; margin: 8px 0 0; font-size: 13px; }
+.pc-list li { display: flex; gap: 8px; padding: 5px 0; border-top: 1px solid var(--line); }
+.pc-list li b { width: 18px; flex: none; }
+.pc-list li.ok b { color: var(--pb); }
+.pc-list li.no b { color: var(--live); }
+.pc-list li em { font-style: normal; color: var(--ink400); margin-left: auto; text-align: right; }
+.ov-general .row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; }
+.ov-general .row input { accent-color: var(--main); width: 16px; height: 16px; margin: 0; }
+

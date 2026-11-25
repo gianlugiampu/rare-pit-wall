@@ -90,13 +90,63 @@ pub struct Settings {
     pub items: BTreeMap<String, Item>,
     /// Posizioni salvate: combinazione di monitor → overlay → [x, y] in pixel dello schermo
     pub layouts: BTreeMap<String, BTreeMap<String, [i32; 2]>>,
+    /// F11 · modalità streaming: Stratega, Benzina e Box non finiscono nella diretta (il pilota li vede)
+    pub stream: bool,
+    /// F43 · modalità leggera: overlay aggiornati 20 volte al secondo e senza animazioni (PC meno potenti)
+    pub light: bool,
+    /// F10 · ricorda quali overlay sono accesi per ogni auto e li riaccende quando sali su quell'auto
+    pub per_car: bool,
+    pub cars: BTreeMap<String, BTreeMap<String, bool>>,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { enabled: false, show: "pista".into(), items: BTreeMap::new(), layouts: BTreeMap::new() }
+        Settings { enabled: false, show: "pista".into(), items: BTreeMap::new(), layouts: BTreeMap::new(), stream: false, light: false, per_car: true, cars: BTreeMap::new() }
     }
 }
+
+/// F10 · auto su cui sei adesso (nome di iRacing)
+static CUR_CAR: Mutex<String> = Mutex::new(String::new());
+
+/// F10 · cambiata auto: si riaccendono gli overlay che avevi con quell'auto
+fn apply_car(app: &AppHandle, car: &str) {
+    let changed = {
+        let mut st = STATE.lock().unwrap();
+        if !st.settings.per_car {
+            return;
+        }
+        let Some(saved) = st.settings.cars.get(car).cloned() else { return };
+        let mut changed = false;
+        for (id, on) in saved {
+            let mut it = st.settings.item(&id);
+            if it.on != on {
+                it.on = on;
+                st.settings.items.insert(id, it);
+                changed = true;
+            }
+        }
+        changed.then(|| st.settings.clone())
+    };
+    if let Some(s) = changed {
+        save(app, &s);
+        sync(app);
+    }
+}
+
+/// F11 · la finestra non compare nelle catture dello schermo (OBS, Discord…), ma sul monitor sì
+#[cfg(windows)]
+fn exclude_capture(w: &WebviewWindow, on: bool) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::SetWindowDisplayAffinity;
+    let Ok(h) = w.hwnd() else { return };
+    unsafe {
+        SetWindowDisplayAffinity(h.0 as windows_sys::Win32::Foundation::HWND, if on { 0x11 } else { 0 });
+    }
+}
+#[cfg(not(windows))]
+fn exclude_capture(_w: &WebviewWindow, _on: bool) {}
+
+/// F11 · overlay con informazioni del team, nascosti alla diretta in modalità streaming
+const STREAM_HIDE: &[&str] = &["stratega", "benzina", "box"];
 
 impl Settings {
     fn item(&self, id: &str) -> Item {
@@ -229,6 +279,7 @@ pub fn sync(app: &AppHandle) {
         match (want, existing) {
             (true, Some(w)) => {
                 click_through(&w, !edit || fixed);
+                exclude_capture(&w, settings.stream && STREAM_HIDE.contains(&k.id));
                 if fixed {
                     let (x, y, ww, hh) = edge_rect(app, k, &settings);
                     let _ = w.set_size(tauri::PhysicalSize::new(ww, hh));
@@ -268,6 +319,7 @@ pub fn sync(app: &AppHandle) {
                     }
                     let _ = w.set_position(PhysicalPosition::new(x, y));
                     click_through(&w, !edit || fixed);
+                    exclude_capture(&w, settings.stream && STREAM_HIDE.contains(&k.id));
                 }
             }
             (false, Some(w)) => {
@@ -289,7 +341,7 @@ fn is_overlay_target(t: &EventTarget) -> bool {
 }
 
 fn config_payload(s: &Settings, edit: bool) -> serde_json::Value {
-    serde_json::json!({ "edit": edit, "items": items().into_iter().map(|id| (id, s.item(id))).collect::<BTreeMap<_, _>>() })
+    serde_json::json!({ "edit": edit, "light": s.light, "items": items().into_iter().map(|id| (id, s.item(id))).collect::<BTreeMap<_, _>>() })
 }
 
 /// Salva le posizioni degli overlay aperti per la combinazione di monitor attuale
@@ -683,6 +735,13 @@ fn start_reader(app: AppHandle) {
                             .map(|km| km * 1000.0);
                         slow.drivers_rev = info_rev;
                         *DRIVERS.lock().unwrap() = parse_drivers(&yaml, info_rev);
+                        // F10: auto del pilota (per gli overlay ricordati per auto)
+                        let me: usize = irsdk::yaml_value(&yaml, "DriverCarIdx", None).and_then(|v| v.parse().ok()).unwrap_or(usize::MAX);
+                        let car = DRIVERS.lock().unwrap().list.iter().find(|d| d.idx == me).map(|d| d.car.clone()).unwrap_or_default();
+                        if !car.is_empty() && *CUR_CAR.lock().unwrap() != car {
+                            *CUR_CAR.lock().unwrap() = car.clone();
+                            apply_car(&app, &car);
+                        }
                         // pista e configurazione: si carica la mappa già disegnata, se c'è
                         let key = format!(
                             "{}-{}",
@@ -811,7 +870,8 @@ fn start_reader(app: AppHandle) {
                 }
             }
             tick = tick.wrapping_add(1);
-            std::thread::sleep(Duration::from_millis(if open { 16 } else { 250 }));
+            let light = STATE.lock().unwrap().settings.light;
+            std::thread::sleep(Duration::from_millis(if !open { 250 } else if light { 50 } else { 16 }));
             if !open {
                 // a 4 Hz i dati lenti vanno aggiornati a ogni giro del ciclo
                 tick = tick.wrapping_add(14);
@@ -866,6 +926,25 @@ pub fn push_stratega(app: &AppHandle, v: serde_json::Value) {
 /// P8.4 · messaggio del team dal pit wall: compare nel «Box del pit wall» (se acceso)
 pub fn push_box(app: &AppHandle, author: &str, text: &str) {
     let _ = app.emit_filter("ov-box", serde_json::json!({ "author": author, "text": text }), is_overlay_target);
+}
+
+/// Overlay accesi/spenti (per ricordarli per auto)
+fn items_on(s: &Settings) -> BTreeMap<String, bool> {
+    items().into_iter().map(|id| (id.to_string(), s.item(id).on)).collect()
+}
+
+/// F44 · impostazioni degli overlay per la copia di sicurezza
+pub fn export_settings() -> serde_json::Value {
+    serde_json::to_value(&STATE.lock().unwrap().settings).unwrap_or_default()
+}
+
+/// F44 · ripristino dalla copia di sicurezza
+pub fn import_settings(app: &AppHandle, v: serde_json::Value) -> bool {
+    let Ok(s) = serde_json::from_value::<Settings>(v) else { return false };
+    STATE.lock().unwrap().settings = s.clone();
+    save(app, &s);
+    sync(app);
+    true
 }
 
 /// Avvio: impostazioni dal disco, tasti rapidi e lettore
@@ -923,6 +1002,7 @@ pub struct OverlayState {
     has_layout: bool,
     /// P8.5: indirizzo base delle grafiche per OBS (vuoto se il mini sito non è partito)
     obs_base: String,
+    car: String,
 }
 
 #[tauri::command]
@@ -940,17 +1020,33 @@ pub fn overlay_state(app: AppHandle) -> OverlayState {
             port => format!("http://localhost:{port}/obs/"),
         },
         monitors: key,
+        car: CUR_CAR.lock().unwrap().clone(),
     }
 }
 
 /// Impostazioni cambiate dalla finestra delle impostazioni (async: aprire finestre da un comando sincrono blocca Windows)
 #[tauri::command]
-pub async fn overlay_save(app: AppHandle, enabled: bool, show: String, items: BTreeMap<String, Item>) {
+pub async fn overlay_save(app: AppHandle, enabled: bool, show: String, items: BTreeMap<String, Item>, stream: Option<bool>, light: Option<bool>, per_car: Option<bool>) {
     let s = {
         let mut st = STATE.lock().unwrap();
         st.settings.enabled = enabled;
         st.settings.show = show;
         st.settings.items = items;
+        if let Some(v) = stream {
+            st.settings.stream = v;
+        }
+        if let Some(v) = light {
+            st.settings.light = v;
+        }
+        if let Some(v) = per_car {
+            st.settings.per_car = v;
+        }
+        // F10: gli overlay accesi si ricordano per l'auto in uso
+        let car = CUR_CAR.lock().unwrap().clone();
+        if st.settings.per_car && !car.is_empty() {
+            let map = items_on(&st.settings);
+            st.settings.cars.insert(car, map);
+        }
         if !enabled {
             st.edit = false;
         }

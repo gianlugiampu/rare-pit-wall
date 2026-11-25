@@ -96,7 +96,9 @@ function showPaired(paired: boolean, driver: string | null) {
   if (!paired) $<HTMLInputElement>("code").focus();
 }
 
+let lastStatus: Status | null = null;
 function render(s: Status) {
+  lastStatus = s;
   // Pit wall dal vivo
   if (s.live) {
     $<HTMLInputElement>("live-manual").checked = s.live.on;
@@ -293,6 +295,50 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
   $("open-site").addEventListener("click", () => openUrl(`${SITE}/app`));
+  // F10 · avvio con Windows
+  const auto = $<HTMLInputElement>("autostart");
+  auto.checked = await invoke<boolean>("get_autostart");
+  auto.addEventListener("change", () => invoke("set_autostart", { on: auto.checked }));
+  // F44 · copia di sicurezza
+  $("bk-save").addEventListener("click", async () => {
+    try {
+      $("bk-msg").textContent = `✓ Copia salvata in ${await invoke<string>("settings_backup")}`;
+    } catch (e) {
+      $("bk-msg").textContent = String(e);
+    }
+  });
+  $("bk-load").addEventListener("click", async () => {
+    if (!confirm("Ripristinare le impostazioni dalla copia? Quelle di adesso vengono sostituite.")) return;
+    try {
+      $("bk-msg").textContent = `✓ ${await invoke<string>("settings_restore")}. Riapri le schede per vederle.`;
+    } catch (e) {
+      $("bk-msg").textContent = String(e);
+    }
+  });
+  // F42 · controllo prima della gara
+  $("pc-go").addEventListener("click", async () => {
+    const list = $("pc-list");
+    list.innerHTML = "<li>Controllo…</li>";
+    const [paired, ov, engS, lis, ctl] = await Promise.all([
+      invoke<boolean>("check_pairing").catch(() => false),
+      invoke<{ settings: { enabled: boolean } }>("overlay_state"),
+      invoke<EngState>("get_engineer"),
+      invoke<{ install: VoiceStatus; mics: string[] }>("listen_state"),
+      invoke<{ bindings: Record<string, { key?: string | null; button?: number | null }>; devices: string[] }>("controls_state"),
+    ]);
+    const talk = ctl.bindings["parla"];
+    const rows: [boolean, string, string][] = [
+      [paired, "Collegato al sito", "scheda Collegamento"],
+      [lastStatus?.iracing ?? false, "iRacing aperto", "apri iRacing ed entra in sessione"],
+      [ov.settings.enabled, "Overlay accesi", "scheda Overlay → «Overlay attivi»"],
+      [engS.settings.enabled && (engS.voiceStatus.state === "pronta" || engS.settings.voice !== "serena"), "Serena pronta", "scheda Voce"],
+      [lis.install.state === "pronta" && lis.mics.length > 0, "Comandi a voce e microfono", "scheda Voce → scarica e scegli il microfono"],
+      [!!(talk && (talk.key || talk.button)), "Tasto per parlare assegnato", "scheda Voce → «Tieni premuto e parla»"],
+      [ctl.devices.length > 0, "Volante collegato", "collega il volante e aspetta qualche secondo"],
+      [$<HTMLInputElement>("live-auto").checked, "Pit wall automatico nelle gare", "scheda In pista"],
+    ];
+    list.innerHTML = rows.map(([ok, label, fix]) => `<li class="${ok ? "ok" : "no"}"><b>${ok ? "✓" : "✗"}</b><span>${label}</span>${ok ? "" : `<em>${fix}</em>`}</li>`).join("");
+  });
   $("open-profile").addEventListener("click", (e) => {
     e.preventDefault();
     openUrl(`${SITE}/app/profilo#pitwall`);

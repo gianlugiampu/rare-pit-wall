@@ -61,6 +61,9 @@ struct Config {
     /// P9: microfono per i comandi a voce (vuoto = quello di Windows)
     #[serde(default)]
     mic: String,
+    /// F10: avvio con Windows spento dal pilota (di base acceso)
+    #[serde(default)]
+    autostart_off: bool,
 }
 
 /// Toglie l'abbinamento ma tiene le impostazioni (voce, volume…)
@@ -956,6 +959,74 @@ fn set_engineer(app: AppHandle, shared: tauri::State<Arc<Shared>>, settings: eng
     }
 }
 
+// ——— F10 · avvio con Windows ———
+#[tauri::command]
+fn get_autostart(app: AppHandle) -> bool {
+    !load_config(&app).autostart_off
+}
+
+#[tauri::command]
+fn set_autostart(app: AppHandle, on: bool) {
+    use tauri_plugin_autostart::ManagerExt;
+    let mut c = load_config(&app);
+    c.autostart_off = !on;
+    save_config(&app, &c);
+    let _ = if on { app.autolaunch().enable() } else { app.autolaunch().disable() };
+}
+
+// ——— F44 · copia di sicurezza delle impostazioni (in Documenti\Rare Pit Wall, senza il codice del PC) ———
+fn backup_path(app: &AppHandle) -> Option<std::path::PathBuf> {
+    app.path().document_dir().ok().map(|d| d.join("Rare Pit Wall").join("impostazioni-rare-pit-wall.json"))
+}
+
+#[tauri::command]
+fn settings_backup(app: AppHandle) -> Result<String, String> {
+    let p = backup_path(&app).ok_or("cartella Documenti non trovata")?;
+    let c = load_config(&app);
+    let v = serde_json::json!({
+        "versione": VERSION,
+        "overlay": overlay::export_settings(),
+        "comandi": controls::export_bindings(),
+        "ingegnere": c.engineer,
+        "microfono": c.mic,
+        "pitwallAutomatico": !c.pitwall_auto_off,
+    });
+    if let Some(d) = p.parent() {
+        std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(&p, serde_json::to_string_pretty(&v).unwrap_or_default()).map_err(|e| e.to_string())?;
+    Ok(p.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+fn settings_restore(app: AppHandle, shared: tauri::State<Arc<Shared>>) -> Result<String, String> {
+    let p = backup_path(&app).ok_or("cartella Documenti non trovata")?;
+    let text = std::fs::read_to_string(&p).map_err(|_| format!("Nessuna copia in {}", p.to_string_lossy()))?;
+    let v: serde_json::Value = serde_json::from_str(&text).map_err(|_| "copia non valida".to_string())?;
+    if let Some(o) = v.get("overlay") {
+        overlay::import_settings(&app, o.clone());
+    }
+    if let Some(b) = v.get("comandi") {
+        controls::import_bindings(&app, b.clone());
+    }
+    let mut c = load_config(&app);
+    if let Some(e) = v.get("ingegnere").and_then(|e| serde_json::from_value::<engineer::Settings>(e.clone()).ok()) {
+        *shared.engineer.lock().unwrap() = e.clone();
+        *coach::PREF.lock().unwrap() = e.coach_ref.clone();
+        c.engineer = e;
+    }
+    if let Some(m) = v.get("microfono").and_then(|m| m.as_str()) {
+        c.mic = m.to_string();
+        ascolto::set_mic(m.to_string());
+    }
+    if let Some(a) = v.get("pitwallAutomatico").and_then(|a| a.as_bool()) {
+        c.pitwall_auto_off = !a;
+    }
+    save_config(&app, &c);
+    CONFIG_CACHE.lock().unwrap().take();
+    Ok(format!("Impostazioni ripristinate dalla copia del {}", v["versione"].as_str().map(|x| format!("programma {x}")).unwrap_or_default()))
+}
+
 // ——— P9 · comandi a voce ———
 #[tauri::command]
 fn listen_state() -> ascolto::ListenState {
@@ -1103,13 +1174,18 @@ pub fn run() {
         .manage(shared.clone())
         .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto, get_moments, jump_to_moment, export_clips, clip_status, cancel_clips, open_videos, clip_files, send_clip,
             overlay::overlay_state, overlay::overlay_save, overlay::overlay_edit, overlay::overlay_reset, overlay::overlay_open_settings, overlay::overlay_hello, overlay::overlay_drivers, overlay::overlay_map, overlay::overlay_map_dir,
-            listen_state, listen_install, listen_set_mic,
+            listen_state, listen_install, listen_set_mic, get_autostart, set_autostart, settings_backup, settings_restore,
             controls::controls_state, controls::controls_assign_button, controls::controls_set_key, controls::controls_clear_button, controls::controls_test])
         .setup(move |app| {
             // Parte con Windows (si può togliere da Impostazioni → App → Avvio)
             {
                 use tauri_plugin_autostart::ManagerExt;
-                let _ = app.autolaunch().enable();
+                // F10: di base parte con Windows (nascosto vicino all'orologio); il pilota lo può spegnere
+                if load_config(app.handle()).autostart_off {
+                    let _ = app.autolaunch().disable();
+                } else {
+                    let _ = app.autolaunch().enable();
+                }
             }
             // Icona vicino all'orologio con menu
             let open = MenuItem::with_id(app, "open", "Apri Rare Pit Wall", true, None::<&str>)?;

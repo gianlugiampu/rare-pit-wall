@@ -236,6 +236,21 @@ fn start_joystick(app: AppHandle) {
     });
 }
 
+/// F44 · tasti assegnati, per la copia di sicurezza
+pub fn export_bindings() -> serde_json::Value {
+    serde_json::to_value(&STATE.lock().unwrap().bindings).unwrap_or_default()
+}
+
+/// F44 · ripristino dei tasti dalla copia di sicurezza
+pub fn import_bindings(app: &AppHandle, v: serde_json::Value) {
+    if let Ok(b) = serde_json::from_value::<BTreeMap<String, Binding>>(v) {
+        STATE.lock().unwrap().bindings = b;
+        save(app);
+        register_keys(app);
+        let _ = app.emit("controls-changed", ());
+    }
+}
+
 pub fn init(app: &AppHandle) {
     let b: BTreeMap<String, Binding> = path(app).and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default();
     STATE.lock().unwrap().bindings = b;

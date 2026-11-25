@@ -661,6 +661,8 @@ let live = false; // dati veri da iRacing
 
 function build() {
   const it = item(cfg, id);
+  // F43 · modalità leggera: niente animazioni
+  document.body.classList.toggle("light", !!(cfg as Config & { light?: boolean }).light);
   view = (BUILDERS[id] ?? buildDelta)(it);
   view.el.id = "root";
   view.el.style.setProperty("--bg-a", String(it.opacity / 100));
