@@ -178,8 +178,13 @@ function buildBenzina(it: Item): View {
   const el = document.createElement("div");
   el.className = "panel benzina tab";
   const rows: Record<string, HTMLElement> = {};
+  // P10 · Benzina v2 (bozza v3 approvata il 25/11/2026): intestazione, soste, finestra box, risparmio, avanzo
+  const head = document.createElement("div");
+  head.className = "fz-hd";
+  head.innerHTML = `<span class="d">BENZINA</span><span></span>`;
+  if (o("head")) el.append(head);
   const labels: [string, string][] = [
-    ["fuel", "Benzina"], ["laps", "Giri rimasti"], ["avg", "Media giro"], ["lastLap", "Ultimo giro"], ["add", "Da mettere"], ["target", "Per arrivare"],
+    ["fuel", "Benzina"], ["laps", "Giri rimasti"], ["avg", "Media giro"], ["lastLap", "Ultimo giro"], ["add", "Da mettere"], ["target", "Per arrivare"], ["stops", "Soste"],
   ];
   for (const [k, l] of labels) {
     if (!o(k)) continue;
@@ -189,6 +194,20 @@ function buildBenzina(it: Item): View {
     rows[k] = r;
     el.append(r);
   }
+  // finestra box: giri buoni per l'unica sosta, con la barra della gara
+  const win = document.createElement("div");
+  win.className = "fz-plan";
+  win.innerHTML = `<span class="muted">Finestra box</span> <b class="fz-r"></b><div class="fz-win"><i></i><em></em></div>`;
+  win.hidden = true;
+  if (o("window")) el.append(win);
+  const save = document.createElement("div");
+  save.className = "fz-plan";
+  save.hidden = true;
+  if (o("save")) el.append(save);
+  const left = document.createElement("div");
+  left.className = "fz-plan";
+  left.hidden = true;
+  if (o("left")) el.append(left);
   const tank = document.createElement("div");
   tank.className = "tank";
   tank.innerHTML = "<i></i>";
@@ -221,6 +240,43 @@ function buildBenzina(it: Item): View {
         set("add", dash);
         set("target", dash);
       }
+      // intestazione: gara a giri o a tempo e giro in corso
+      (head.lastElementChild as HTMLElement).textContent = s.session === "Race" ? `${s.lapsTotal ? `gara ${s.lapsTotal} giri` : "gara a tempo"} · giro ${s.lap}` : `giro ${s.lap}`;
+      // soste, finestra box, risparmio, avanzo
+      let stops: number | null = null;
+      win.hidden = save.hidden = left.hidden = true;
+      if (per && togo != null && togo > 0.2) {
+        const need = (togo + 0.3) * per - s.fuel;
+        const tankL = s.fuelMax ?? 0;
+        stops = need <= 0 ? 0 : tankL > 0 ? Math.ceil(need / tankL) : null;
+        const endLap = s.lap + togo;
+        if (need <= 0) {
+          left.hidden = false;
+          left.innerHTML = `<span class="muted">All'arrivo restano</span> <b class="fz-r pb">${n1(s.fuel - togo * per)} L</b>`;
+        } else {
+          // per non fermarti: consumo a giro che basta, se il risparmio è possibile (fino al 25%)
+          const target = s.fuel / (togo + 0.3);
+          const pct = (target / per - 1) * 100;
+          if (pct > -25) {
+            save.hidden = false;
+            save.innerHTML = `<span class="muted">Per non fermarti</span> <b class="fz-r"><span>${target.toFixed(2)} L</span> <span class="slow">(${Math.round(pct)}%)</span></b>`;
+          }
+          if (stops === 1 && tankL > 0) {
+            const last = Math.floor(s.lap + s.fuel / per - 0.3); // ultimo giro prima di restare a secco
+            const first = Math.max(s.lap, Math.ceil(endLap - (tankL / per - 0.3))); // da qui un pieno basta fino alla fine
+            if (first <= last) {
+              win.hidden = false;
+              (win.querySelector(".fz-r") as HTMLElement).textContent = `giro ${first} – ${last}`;
+              const pos = (x: number) => `${Math.max(0, Math.min(100, (x / endLap) * 100))}%`;
+              const bar = win.querySelector(".fz-win i") as HTMLElement;
+              bar.style.left = pos(first);
+              bar.style.width = `calc(${pos(last + 1)} - ${pos(first)})`;
+              (win.querySelector(".fz-win em") as HTMLElement).style.left = pos(s.lap + f.lapPct);
+            }
+          }
+        }
+      }
+      set("stops", stops == null ? dash : String(stops), stops ? "slow" : "pb");
       const fill = tank.firstElementChild as HTMLElement;
       fill.style.width = s.fuelMax ? `${Math.min(100, (s.fuel / s.fuelMax) * 100)}%` : "0";
       fill.style.background = lapsTone === "bad" ? "var(--lap-invalid)" : lapsTone === "slow" ? "var(--lap-slow)" : "var(--lap-pb)";
@@ -404,6 +460,42 @@ function buildRadarBars(it: Item): View {
   };
 }
 
+// ——— Bandiere (P10, bozza v3 approvata): solo la bandiera, la dice Serena a voce ———
+const FLAG_KINDS: [string, number, string][] = [
+  ["black", 0x10000 | 0x20000, "blk"],
+  ["repair", 0x100000, "meat"],
+  ["yellow", 0x8 | 0x100 | 0x4000 | 0x8000, "yel"],
+  ["blue", 0x20, "blu"],
+  ["checkered", 0x1, "chk"],
+  ["white", 0x2, "white"],
+  ["green", 0x4, "grn"],
+];
+function buildBandiere(it: Item): View {
+  const o = (k: string) => opt(it, "bandiere", k);
+  const el = document.createElement("div");
+  el.className = "bandiere";
+  el.innerHTML = `<span class="pole"><span class="flagbig"></span></span>`;
+  const flag = el.querySelector(".flagbig") as HTMLElement;
+  let cur = "";
+  let since = 0;
+  return {
+    el,
+    update(_f, s) {
+      const ss = s ?? lastSlow;
+      const bits = cfg.edit && !live ? 0x20 : ss?.flags ?? 0;
+      const k = FLAG_KINDS.find(([key, b]) => bits & b && o(key));
+      const now = k?.[2] ?? "";
+      if (now !== cur) {
+        cur = now;
+        since = performance.now();
+        flag.className = `flagbig ${now}`;
+      }
+      el.hidden = !now;
+      el.classList.toggle("small", !!now && performance.now() - since > Number(o("big")) * 1000 && !cfg.edit);
+    },
+  };
+}
+
 // ——— Stratega (P13, bozza v1 approvata): dati dall'ingegnere una volta al secondo ———
 type StratCar = { idx: number; gap: number | null; hist: number[]; rate: number | null; laps: number | null };
 type Strat = { race: boolean; pos: number; lapsRemain: number | null; lastLap: number; ahead: StratCar; behind: StratCar; goal: number | null; slow: number | null };
@@ -518,7 +610,7 @@ function carView(b: (it: Item) => CarView): (it: Item) => View {
 const BUILDERS: Record<string, (it: Item) => View> = {
   delta: buildDelta, sessione: buildSessione, benzina: buildBenzina, pedali: buildPedali,
   relative: carView(buildRelative), classifica: carView(buildClassifica),
-  radar: buildRadar, box: buildBox, stratega: buildStratega,
+  radar: buildRadar, box: buildBox, stratega: buildStratega, bandiere: buildBandiere,
   mappa: (it) => {
     const v = buildMappa(it);
     return {

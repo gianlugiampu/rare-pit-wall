@@ -41,6 +41,8 @@ pub const KINDS: &[Kind] = &[
     kind("benzina", "Benzina", (190.0, 130.0), (0.88, 0.66)),
     kind("pedali", "Pedali", (340.0, 74.0), (0.66, 0.86)),
     kind("mappa", "Mappa", (230.0, 170.0), (0.1, 0.55)),
+    // P10: Bandiere grandi senza scritte (bozza v3 approvata il 25/11/2026), spento di base
+    Kind { on: false, ..kind("bandiere", "Bandiere", (120.0, 90.0), (0.5, 0.22)) },
     // P13: Stratega (bozza v1 approvata il 25/11/2026), spento di base: si accende dalla scheda Overlay
     Kind { on: false, ..kind("stratega", "Stratega", (330.0, 150.0), (0.84, 0.42)) },
     // P8.4: box del pit wall (spento di base, compare solo quando arriva un messaggio) e radar a luci

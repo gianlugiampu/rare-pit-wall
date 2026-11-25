@@ -184,3 +184,26 @@ b { font-weight: 700; color: #fff; }
 .st-alert .d { font-size: 12px; }
 @keyframes st-blink { 50% { background: #a3122b; } }
 
+/* P10 · Benzina v2 (bozza v3 approvata il 25/11/2026) */
+.fz-hd { display: flex; justify-content: space-between; align-items: center; gap: 12px; height: 22px; padding: 0 8px; background: rgb(150 0 255 / .22); font-size: 11px; white-space: nowrap; }
+.fz-hd .d { color: #fff; letter-spacing: .06em; }
+.fz-plan { padding: 5px 8px; border-top: 1px solid rgb(255 255 255 / .06); font-size: 11px; white-space: nowrap; }
+.fz-plan .fz-r { float: right; padding-left: 12px; font-size: 12px; color: #fff; }
+.fz-win { clear: both; position: relative; height: 8px; margin-top: 5px; border-radius: 2px; background: rgb(255 255 255 / .1); }
+.fz-win i { position: absolute; top: 0; height: 100%; border-radius: 2px; background: var(--lap-slow); }
+.fz-win em { position: absolute; top: -3px; width: 2px; height: 14px; background: #fff; }
+
+/* P10 · Bandiere: solo la bandiera disegnata, grande e poi piccola */
+.bandiere { padding: 8px 8px 4px 4px; width: max-content; }
+.bandiere .pole { position: relative; display: inline-block; padding-left: 8px; }
+.bandiere .pole::before { content: ""; position: absolute; left: 0; top: -4px; width: 5px; height: calc(100% + 12px); background: #ddd; border-radius: 2px; box-shadow: 0 2px 6px rgb(0 0 0 / .5); }
+.bandiere .flagbig { display: block; width: 96px; height: 64px; border-radius: 3px; clip-path: polygon(0 0, 100% 6%, 96% 50%, 100% 94%, 0 100%); transition: width .3s, height .3s; }
+.bandiere.small .flagbig { width: 36px; height: 24px; }
+.flagbig.chk { background: repeating-conic-gradient(#fff 0 25%, #111 0 50%) 0 0 / 16px 16px; }
+.flagbig.meat { background: radial-gradient(circle, #ff7a00 0 32%, #111 33%); }
+.flagbig.white { background: #f4f4f4; }
+.flagbig.yel { background: #ffd400; }
+.flagbig.blu { background: #1f6fff; }
+.flagbig.blk { background: #111; box-shadow: inset 0 0 0 2px #fff; }
+.flagbig.grn { background: #19b84a; }
+
