@@ -99,6 +99,10 @@ pub struct Tele {
     /// E10: pista bagnata (0 = non si sa, 1 asciutta … 7 molto bagnata), dichiarata bagnata, temperatura per il trend
     pub wetness: i32,
     pub declared_wet: bool,
+    /// F12: arrivo previsto e, con 3 decimi a giro in meno, la posizione possibile
+    pub forecast: Option<(i32, i32)>,
+    /// F13: gomme diverse dalle tue in pista: (quanti secondi a giro sono più veloci, sei con le gomme da asciutto)
+    pub tyre_gap: Option<(f32, bool)>,
 }
 
 /// P13 · rientro dopo una sosta fatta adesso
@@ -221,6 +225,8 @@ pub struct Engineer {
     tyre_said: bool,
     // D7 · ultimo giro in cui si è detto il risparmio
     save_said_lap: i32,
+    // F13 · ultimo giro in cui si è detto il consiglio sulle gomme da pioggia
+    wet_tip_lap: i32,
 }
 
 impl Engineer {
@@ -424,6 +430,21 @@ impl Engineer {
                 self.push(format!("Il {num} {where_} sta calando: {} più lento dei suoi giri migliori", say_gap(drop)), false);
             }
         }
+        // F13 · strategia meteo: chi ha gomme diverse dalle tue va molto più forte (al massimo ogni 3 giri)
+        if let Some((gap, on_dry)) = t.tyre_gap {
+            if gap >= 1.5 && self.laps_done - self.wet_tip_lap >= 3 {
+                self.wet_tip_lap = self.laps_done;
+                let text = if on_dry {
+                    format!("Chi ha le gomme da pioggia gira {} più forte: conviene fermarsi", say_gap(gap))
+                } else {
+                    format!("La pista si asciuga: chi ha le slick gira {} più forte, conviene cambiare", say_gap(gap))
+                };
+                self.push(text, true);
+            }
+        } else if t.declared_wet && t.wetness >= 5 && self.laps_done - self.wet_tip_lap >= 5 {
+            self.wet_tip_lap = self.laps_done;
+            self.push("Pista molto bagnata: valuta le gomme da pioggia".into(), true);
+        }
         // D7 · risparmio benzina: ogni 5 giri, quando basta risparmiare per evitare la sosta
         if self.laps_done - self.save_said_lap >= 5 {
             if let Some(text) = Engineer::save_text(t).filter(|x| x.starts_with("Per non fermarti")) {
@@ -522,6 +543,7 @@ impl Engineer {
             was_pit: false,
             tyre_said: false,
             save_said_lap: -99,
+            wet_tip_lap: -99,
         }
     }
 
@@ -732,6 +754,12 @@ impl Engineer {
                 if !self.half_said && total >= 10 && rem == total / 2 {
                     self.half_said = true;
                     self.push(format!("Metà gara, mancano {rem} giri"), false);
+                    // F12 · previsione dell'arrivo a metà gara
+                    if s.strategy {
+                        if let Some(text) = forecast_text(t) {
+                            self.push(text, false);
+                        }
+                    }
                 }
                 if !self.five_said && rem == 5 {
                     self.five_said = true;
@@ -1033,6 +1061,18 @@ fn strategia_window(lap: i32, remain: f32, fuel: f32, per: f32, tank: f32) -> Op
     crate::strategia::pit_window(lap, remain, fuel, per, tank)
 }
 
+// ——— F12 · previsione dell'arrivo ———
+
+/// «Arrivo previsto P5; con 3 decimi a giro in meno arrivi P4»
+pub fn forecast_text(t: &Tele) -> Option<String> {
+    let (pos, better) = t.forecast?;
+    Some(if better < pos {
+        format!("Arrivo previsto P{pos}; con 3 decimi a giro in meno arrivi P{better}")
+    } else {
+        format!("Arrivo previsto P{pos}")
+    })
+}
+
 // ——— F17 · gomme ———
 
 /// Media degli ultimi 3 giri dello stint meno la media dei 3 migliori dei primi 6 (da 6 giri in su)
@@ -1150,6 +1190,13 @@ mod tests {
         let t = Tele { ahead_num: "7".into(), behind_num: "12".into(), ahead_pace: Some((106.2, None)), behind_pace: Some((105.8, Some(0.2))), my_stops: Some(0), ahead_stops: Some(1), behind_stops: Some(0), ..Default::default() };
         assert_eq!(answer(&t, "passo"), "Davanti il 7 gira in 1 minuto 46 e 2, dietro il 12 in 1 minuto 45 e 8");
         assert_eq!(answer(&t, "soste"), "Hai fatto 0 soste, il 7 davanti 1, il 12 dietro 0");
+    }
+    #[test]
+    fn previsione_frase() {
+        let t = Tele { forecast: Some((5, 4)), ..Default::default() };
+        assert_eq!(forecast_text(&t).unwrap(), "Arrivo previsto P5; con 3 decimi a giro in meno arrivi P4");
+        let t = Tele { forecast: Some((3, 3)), ..Default::default() };
+        assert_eq!(forecast_text(&t).unwrap(), "Arrivo previsto P3");
     }
     #[test]
     fn gomme() {

@@ -99,6 +99,11 @@ impl PitLearn {
         }
     }
 
+    /// Ultimo giro buono dell'auto (per la strategia meteo)
+    pub fn last_lap(&self, i: usize) -> Option<f32> {
+        self.laps.get(i)?.last().copied()
+    }
+
     /// F33: soste fatte dall'auto
     pub fn stops(&self, i: usize) -> Option<i32> {
         self.stops.get(i).copied()
@@ -134,6 +139,22 @@ pub fn pace_of(laps: &[f32]) -> Option<(f32, Option<f32>)> {
         last3 - v[..3].iter().sum::<f32>() / 3.0
     });
     Some((last3, drop))
+}
+
+/// F12 · previsione dell'arrivo: posizione prevista dal passo, dalle soste che mancano e dal tempo perso al box.
+/// `me`: (tempo dietro al leader, passo, soste fatte); `cars`: (tempo dietro al leader, passo o None, soste fatte) delle altre auto
+/// in classifica; `remain`: giri che mancano; `my_left`: soste che mancano a te; `faster`: secondi a giro in meno per te.
+pub fn predict(me: (f32, f32, i32), cars: &[(f32, Option<f32>, i32)], remain: f32, my_left: i32, loss: f32, faster: f32) -> i32 {
+    let total_stops = me.2 + my_left; // si suppone che tutti facciano le stesse soste
+    let mine = me.0 + remain * (me.1 - faster) + my_left as f32 * loss;
+    let ahead = cars
+        .iter()
+        .filter(|(f2, pace, stops)| {
+            let left = (total_stops - stops).max(0);
+            f2 + remain * pace.unwrap_or(me.1) + left as f32 * loss < mine
+        })
+        .count();
+    ahead as i32 + 1
 }
 
 /// E4 · finestra per l'unica sosta: (primo giro buono, ultimo giro prima di restare a secco).
@@ -255,6 +276,18 @@ pub fn rejoin(my_f2: f32, loss: f32, cars: &[(String, i32, f32)]) -> (i32, Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn previsione() {
+        // io P2 a 3 s dal primo, giro 1 s più veloce, mancano 10 giri, nessuna sosta: lo passo
+        let cars = vec![(0.0, Some(101.0), 0), (8.0, Some(100.0), 0)];
+        assert_eq!(predict((3.0, 100.0, 0), &cars, 10.0, 0, 25.0, 0.0), 1);
+        // devo ancora fermarmi (25 s), loro si sono già fermati: finisco dietro a tutti e due
+        let fermati = vec![(0.0, Some(101.0), 1), (8.0, Some(100.0), 1)];
+        assert_eq!(predict((3.0, 100.0, 0), &fermati, 10.0, 1, 25.0, 0.0), 3);
+        // tutti devono ancora fermarsi una volta: resto davanti
+        assert_eq!(predict((3.0, 100.0, 0), &cars, 10.0, 1, 25.0, 0.0), 1);
+    }
 
     #[test]
     fn battaglia() {

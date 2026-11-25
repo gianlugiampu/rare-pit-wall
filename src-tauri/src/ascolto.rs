@@ -80,6 +80,10 @@ pub const FRASI: &[(&str, &str)] = &[
     ("risparmio", "risparmio"),
     ("come risparmio benzina", "risparmio"),
     ("quanto devo risparmiare", "risparmio"),
+    // Idee difficili
+    ("come finisco", "previsione"),
+    ("previsione", "previsione"),
+    ("dove arrivo", "previsione"),
 ];
 
 /// Stato mostrato nella scheda Voce

@@ -528,6 +528,8 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                     let (mut gap_ahead, mut gap_behind) = (None, None);
                     let (mut ahead_idx, mut behind_idx) = (-1, -1);
                     let mut others: Vec<(String, i32, f32)> = vec![];
+                    // F12/F13: tutte le altre auto in classifica (indice, tempo dietro al leader)
+                    let mut field: Vec<(usize, f32)> = vec![];
                     let (mut mate_gap, mut mate_pos, mut mate_num) = (None, 0, String::new());
                     let mut my_f2_all = 0.0f32;
                     if me >= 0 && st.position > 0 {
@@ -543,6 +545,7 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                                         (mate_gap, mate_pos, mate_num) = (Some(my_f2 - f2), p, num.clone());
                                     }
                                     others.push((num, p, f2));
+                                    field.push((i, f2));
                                 }
                             }
                             if p == st.position - 1 {
@@ -649,6 +652,47 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         mate_num,
                         track_temp: s.get("TrackTempCrew").or_else(|| s.get("TrackTemp")).map(|v| v.as_f64() as f32),
                         air_temp: s.get("AirTemp").map(|v| v.as_f64() as f32),
+                        forecast: (session == "Race" && st.position > 0 && me >= 0)
+                            .then(|| {
+                                let my_pace = pit_learn.pace(me as usize)?.0;
+                                let per = if fuel_per_lap.is_empty() { None } else { Some(fuel_per_lap.iter().sum::<f32>() / fuel_per_lap.len() as f32) };
+                                let remain = laps_remain.map(|r| r as f32).or_else(|| time_remain.map(|t| (t as f32 / my_pace).ceil() + 1.0))?;
+                                let tank = irsdk::yaml_value(&cur_yaml, "DriverCarFuelMaxLtr", None).and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
+                                let need = per.map(|p| (remain + 0.3) * p - st.fuel_l).unwrap_or(0.0);
+                                let my_left = if need > 0.0 && tank > 0.0 { (need / tank).ceil() as i32 } else { 0 };
+                                let loss = pit_learn.loss().unwrap_or(25.0);
+                                let my_stops = pit_learn.stops(me as usize).unwrap_or(0);
+                                let cars: Vec<(f32, Option<f32>, i32)> = field.iter().map(|(i, f2)| (*f2, pit_learn.pace(*i).map(|p| p.0), pit_learn.stops(*i).unwrap_or(0))).collect();
+                                let pos = strategia::predict((my_f2_all, my_pace, my_stops), &cars, remain, my_left, loss, 0.0);
+                                let better = strategia::predict((my_f2_all, my_pace, my_stops), &cars, remain, my_left, loss, 0.3);
+                                Some((pos, better))
+                            })
+                            .flatten(),
+                        tyre_gap: (session == "Race" && me >= 0)
+                            .then(|| {
+                                // F13: confronto tra chi ha gomme diverse dalle tue (ultimo giro buono)
+                                let mut comp = |i: usize| s.get_at("CarIdxTireCompound", i).map(|v| v.as_i32()).unwrap_or(-1);
+                                let mine = comp(me as usize);
+                                if mine < 0 {
+                                    return None;
+                                }
+                                let (mut same, mut diff) = (vec![], vec![]);
+                                for (i, _) in &field {
+                                    let (c, l) = (comp(*i), pit_learn.last_lap(*i));
+                                    if let (true, Some(l)) = (c >= 0, l) {
+                                        if c == mine { same.push(l) } else { diff.push(l) }
+                                    }
+                                }
+                                if let Some(l) = pit_learn.last_lap(me as usize) {
+                                    same.push(l);
+                                }
+                                if same.len() < 2 || diff.len() < 2 {
+                                    return None;
+                                }
+                                let avg = |v: &Vec<f32>| v.iter().sum::<f32>() / v.len() as f32;
+                                Some((avg(&same) - avg(&diff), mine == 0))
+                            })
+                            .flatten(),
                         rejoin: (session == "Race" && st.position > 0).then(|| {
                             let (loss, learned) = pit_learn.loss().map(|l| (l, true)).unwrap_or((25.0, false));
                             let (pos, ahead, behind) = strategia::rejoin(my_f2_all, loss, &others);
@@ -673,6 +717,8 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                     if let Some(what) = ask {
                         let text = match what.as_str() {
                             "ripeti" => eng.last_text(),
+                            // F12 · previsione dell'arrivo
+                            "previsione" => engineer::forecast_text(&tele).unwrap_or_else(|| "La previsione la faccio in gara, dopo qualche giro".into()),
                             // F17 · gomme
                             "gomme" => match eng.tyre_drop() {
                                 Some((d, n)) if d >= 0.2 => format!("Gomme: dopo {n} giri sei {} decimi più lento di inizio stint", (d * 10.0).round() as i32),
