@@ -75,10 +75,10 @@ async function loadMoments() {
   }
 }
 
-type EngSettings = { enabled: boolean; voice: string | null; volume: number; fuel: boolean; laptime: boolean; gaps: boolean; flags: boolean; race: boolean };
+type EngSettings = { enabled: boolean; voice: string | null; volume: number; fuel: boolean; laptime: boolean; gaps: boolean; flags: boolean; race: boolean; strategy: boolean };
 type VoiceStatus = { state: string; percent: number; message: string };
 type EngState = { settings: EngSettings; voices: { id: string; name: string }[]; voiceStatus: VoiceStatus };
-const FLAGS = ["enabled", "laptime", "fuel", "gaps", "flags", "race"] as const;
+const FLAGS = ["enabled", "laptime", "fuel", "gaps", "flags", "race", "strategy"] as const;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const num = (x: number, d = 1) => x.toFixed(d).replace(".", ",");

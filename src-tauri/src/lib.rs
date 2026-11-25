@@ -300,6 +300,9 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
         let mut tick: u32 = 0;
         // P2: classifica di fine gara
         let mut cur_yaml = String::new();
+        // P13: lunghezza della pista e posizioni delle auto nell'ultimo secondo (per le auto ferme davanti)
+        let mut track_len_m: f32 = 0.0;
+        let mut pct_hist: std::collections::VecDeque<Vec<f32>> = Default::default();
         let (mut subsession, mut session_num, mut official) = (String::new(), 0, false);
         let mut sent: std::collections::HashSet<String> = Default::default();
         let mut pending: Option<(String, String, i32)> = None; // gara finita ma classifica non ancora ufficiale
@@ -346,6 +349,10 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         if let Some(r) = laprec.as_mut() {
                             r.update_info(&yaml, &team_ids);
                         }
+                        track_len_m = irsdk::yaml_value(&yaml, "TrackLength", None)
+                            .and_then(|v| v.split_whitespace().next().and_then(|n| n.parse::<f32>().ok()))
+                            .map(|km| km * 1000.0)
+                            .unwrap_or(0.0);
                         cur_yaml = yaml;
                     }
                     // nuova sessione (controllata a ogni lettura: iRacing può cambiare sessione qualche istante dopo aver
@@ -477,6 +484,44 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                             }
                         }
                     }
+                    // P13: auto ferma o lentissima in pista davanti (entro 800 m), dalle posizioni di un secondo fa
+                    let mut slow_ahead_m: Option<f32> = None;
+                    if me >= 0 && track_len_m > 0.0 {
+                        let pcts: Vec<f32> = (0..64).map(|i| s.get_at("CarIdxLapDistPct", i).map(|v| v.as_f64() as f32).unwrap_or(-1.0)).collect();
+                        if pct_hist.len() >= 20 {
+                            let old = &pct_hist[0];
+                            let mine = pcts[me as usize];
+                            for i in 0..64 {
+                                if i == me as usize || pcts[i] < 0.0 || old[i] < 0.0 || mine < 0.0 {
+                                    continue;
+                                }
+                                let surf = s.get_at("CarIdxTrackSurface", i).map(|v| v.as_i32()).unwrap_or(-1);
+                                let pit = s.get_at("CarIdxOnPitRoad", i).map(|v| v.as_bool()).unwrap_or(false);
+                                if surf != 3 || pit {
+                                    continue; // solo auto in pista, non ai box
+                                }
+                                let mut moved = pcts[i] - old[i];
+                                if moved < -0.5 {
+                                    moved += 1.0;
+                                }
+                                if (moved * track_len_m).abs() > 8.0 {
+                                    continue; // più di ~30 km/h: si muove
+                                }
+                                let mut d = pcts[i] - mine;
+                                if d < 0.0 {
+                                    d += 1.0;
+                                }
+                                let m = d * track_len_m;
+                                if m > 30.0 && m < 800.0 {
+                                    slow_ahead_m = Some(slow_ahead_m.map_or(m, |x| x.min(m)));
+                                }
+                            }
+                        }
+                        pct_hist.push_back(pcts);
+                        if pct_hist.len() > 20 {
+                            pct_hist.pop_front();
+                        }
+                    }
                     let laps_remain = s.get("SessionLapsRemainEx").map(|v| v.as_i32()).filter(|v| *v >= 0 && *v < 32000);
                     let time_remain = s.get("SessionTimeRemain").map(|v| v.as_f64()).filter(|v| *v > 0.0 && *v < 86_400.0);
                     let tele = engineer::Tele {
@@ -500,6 +545,8 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         steer: f(s, "SteeringWheelAngle"),
                         gap_ahead,
                         gap_behind,
+                        speed_kmh: st.speed_kmh as f32,
+                        slow_ahead_m,
                     };
                     let settings = shared.engineer.lock().unwrap().clone();
                     eng.update(&tele, &settings);

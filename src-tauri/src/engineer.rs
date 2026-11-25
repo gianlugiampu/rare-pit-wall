@@ -22,11 +22,13 @@ pub struct Settings {
     pub gaps: bool,
     pub flags: bool,
     pub race: bool,
+    /// P13 · stratega in gara: chi arriva da dietro, chi puoi prendere, auto ferma davanti, ultimi giri
+    pub strategy: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { enabled: true, voice: None, volume: 80, fuel: true, laptime: true, gaps: true, flags: true, race: true }
+        Settings { enabled: true, voice: None, volume: 80, fuel: true, laptime: true, gaps: true, flags: true, race: true, strategy: true }
     }
 }
 
@@ -58,6 +60,9 @@ pub struct Tele {
     pub steer: f32,
     pub gap_ahead: Option<f32>,
     pub gap_behind: Option<f32>,
+    pub speed_kmh: f32,
+    /// P13: auto ferma o lentissima in pista davanti, a quanti metri
+    pub slow_ahead_m: Option<f32>,
 }
 
 // Bandiere di iRacing (SessionFlags)
@@ -105,6 +110,8 @@ impl Output {
 struct Msg {
     text: String,
     important: bool,
+    /// pericolo (auto ferma davanti): si dice subito, anche in curva
+    urgent: bool,
     at: Instant,
 }
 
@@ -133,6 +140,14 @@ pub struct Engineer {
     inc_warned: i32,
     prev_flags: u32,
     flag_said: Vec<(u32, Instant)>,
+    // P13 · stratega: distacchi a fine giro (stesse posizioni), ultimo avviso e auto ferma
+    hist_ahead: Vec<f32>,
+    hist_behind: Vec<f32>,
+    hist_pos: i32,
+    said_behind_lap: i32,
+    said_ahead_lap: i32,
+    endgame_said: bool,
+    slow_said: Option<Instant>,
 }
 
 impl Engineer {
@@ -201,9 +216,61 @@ impl Engineer {
 
     fn push(&mut self, text: String, important: bool) {
         if important {
-            self.queue.push_front(Msg { text, important, at: Instant::now() });
+            self.queue.push_front(Msg { text, important, urgent: false, at: Instant::now() });
         } else {
-            self.queue.push_back(Msg { text, important, at: Instant::now() });
+            self.queue.push_back(Msg { text, important, urgent: false, at: Instant::now() });
+        }
+    }
+
+    /// Pericolo: davanti a tutto, si dice appena possibile anche fuori dal rettilineo
+    fn push_urgent(&mut self, text: String) {
+        self.queue.retain(|m| !m.urgent);
+        self.queue.push_front(Msg { text, important: true, urgent: true, at: Instant::now() });
+    }
+
+    /// P13 · a fine giro: chi arriva da dietro, chi puoi prendere, quanto basta negli ultimi giri
+    fn strategy_lap(&mut self, t: &Tele) {
+        // le posizioni sono cambiate: i distacchi di prima erano di altre auto
+        if t.position != self.hist_pos {
+            self.hist_pos = t.position;
+            self.hist_ahead.clear();
+            self.hist_behind.clear();
+        }
+        let keep = |h: &mut Vec<f32>, g: Option<f32>| match g {
+            Some(g) => {
+                h.push(g);
+                if h.len() > 4 {
+                    h.remove(0);
+                }
+            }
+            None => h.clear(),
+        };
+        keep(&mut self.hist_ahead, t.gap_ahead);
+        keep(&mut self.hist_behind, t.gap_behind);
+        let n = self.laps_done;
+        if let (Some(rate), Some(&gap)) = (closing(&self.hist_behind), self.hist_behind.last()) {
+            if n - self.said_behind_lap >= 4 {
+                if let Some(text) = msg_behind(gap, rate, t.laps_remain) {
+                    self.said_behind_lap = n;
+                    self.push(text, false);
+                }
+            }
+        }
+        if let (Some(rate), Some(&gap)) = (closing(&self.hist_ahead), self.hist_ahead.last()) {
+            if n - self.said_ahead_lap >= 4 {
+                if let Some(text) = msg_ahead(gap, rate, t.laps_remain) {
+                    self.said_ahead_lap = n;
+                    self.push(text, false);
+                }
+            }
+        }
+        if !self.endgame_said {
+            if let (Some(rem), Some(gap)) = (t.laps_remain, t.gap_behind) {
+                if (1..=3).contains(&rem) && t.last_lap > 0.0 {
+                    self.endgame_said = true;
+                    self.push(msg_endgame(gap, closing(&self.hist_behind).unwrap_or(0.0), rem, t.last_lap), false);
+                }
+            }
         }
     }
 
@@ -240,6 +307,13 @@ impl Engineer {
             inc_warned: 99,
             prev_flags: 0,
             flag_said: Vec::new(),
+            hist_ahead: Vec::new(),
+            hist_behind: Vec::new(),
+            hist_pos: 0,
+            said_behind_lap: -99,
+            said_ahead_lap: -99,
+            endgame_said: false,
+            slow_said: None,
         }
     }
 
@@ -286,6 +360,15 @@ impl Engineer {
                     if level < self.inc_warned {
                         self.inc_warned = level;
                         self.push(format!("Attenzione agli incidenti: sei a {} su {}", t.incidents, limit), true);
+                    }
+                }
+            }
+            // P13: auto ferma o lentissima davanti (non lo dice lo spotter); al massimo ogni 20 secondi
+            if s.strategy && t.on_track && !t.on_pit_road && t.speed_kmh > 60.0 && t.flags & CAUTION == 0 {
+                if let Some(m) = t.slow_ahead_m {
+                    if self.slow_said.map_or(true, |at| at.elapsed() > Duration::from_secs(20)) {
+                        self.slow_said = Some(Instant::now());
+                        self.push_urgent(format!("Attenzione, auto ferma davanti a {} metri", ((m / 50.0).round() * 50.0).max(50.0) as i32));
                     }
                 }
             }
@@ -357,6 +440,9 @@ impl Engineer {
         }
         if t.position > 0 {
             self.prev_pos = t.position;
+        }
+        if s.strategy {
+            self.strategy_lap(t);
         }
         // Distacchi ogni 3 giri (sfasati di un giro rispetto ai tempi)
         if s.gaps && n % 3 == 1 && n > 1 {
@@ -443,17 +529,23 @@ impl Engineer {
                 return;
             }
         }
-        if self.last_end.elapsed() < Duration::from_millis(3000) {
+        let urgent = self.queue.front().is_some_and(|m| m.urgent && m.at.elapsed() < Duration::from_secs(8));
+        self.queue.retain(|m| !m.urgent || m.at.elapsed() < Duration::from_secs(8));
+        if self.last_end.elapsed() < Duration::from_millis(if urgent { 300 } else { 3000 }) {
             return;
         }
         let straight = t.throttle > 0.85 && t.steer.abs() < 0.25;
         let parked = !t.on_track || t.on_pit_road;
-        if t.car_alongside || !(straight || parked) {
+        if t.car_alongside || !(straight || parked || urgent) {
             return;
         }
-        let next = match self.out.radio.pop_front() {
-            Some((text, _)) => Some(text),
-            None => self.queue.pop_front().map(|m| m.text),
+        let next = if urgent {
+            self.queue.pop_front().map(|m| m.text)
+        } else {
+            match self.out.radio.pop_front() {
+                Some((text, _)) => Some(text),
+                None => self.queue.pop_front().map(|m| m.text),
+            }
         };
         if let Some(text) = next {
             self.out.speak(&text, false);
@@ -568,6 +660,57 @@ fn say_gap(g: f32) -> String {
     }
 }
 
+// ——— P13 · stratega ———
+
+/// Quanto si accorcia il distacco a giro (positivo = si avvicinano), dagli ultimi giri (almeno 3 misure)
+fn closing(h: &[f32]) -> Option<f32> {
+    (h.len() >= 3).then(|| (h[0] - h[h.len() - 1]) / (h.len() - 1) as f32)
+}
+
+/// Auto dietro più veloce: quando arriva
+fn msg_behind(gap: f32, rate: f32, laps_remain: Option<i32>) -> Option<String> {
+    if rate < 0.25 || gap > 6.0 {
+        return None;
+    }
+    let laps = ((gap - 0.3) / rate).ceil().max(1.0) as i32;
+    if laps_remain.is_some_and(|r| laps > r) {
+        return Some(format!("L'auto dietro recupera {} a giro, ma non ti prende prima della fine", say_gap(rate)));
+    }
+    Some(if laps <= 1 {
+        format!("L'auto dietro recupera {} a giro: è già sotto, difendi", say_gap(rate))
+    } else {
+        format!("L'auto dietro recupera {} a giro: ti prende in {laps} giri", say_gap(rate))
+    })
+}
+
+/// Auto davanti più lenta: quando la prendi
+fn msg_ahead(gap: f32, rate: f32, laps_remain: Option<i32>) -> Option<String> {
+    if rate < 0.2 || gap > 8.0 {
+        return None;
+    }
+    let laps = ((gap - 0.5) / rate).ceil().max(1.0) as i32;
+    if laps_remain.is_some_and(|r| laps > r) {
+        return None; // non la prendi: meglio non distrarre
+    }
+    Some(if laps <= 1 {
+        format!("Recuperi {} a giro su chi ti precede: ce l'hai, attacca", say_gap(rate))
+    } else {
+        format!("Recuperi {} a giro su chi ti precede: lo prendi in {laps} giri", say_gap(rate))
+    })
+}
+
+/// Ultimi giri: che tempo basta per tenere dietro chi ti segue
+fn msg_endgame(gap: f32, rate: f32, laps_remain: i32, last_lap: f32) -> String {
+    let rem = laps_remain.max(1) as f32;
+    let their = last_lap - rate; // passo di chi ti segue
+    let needed = their + (gap - 0.3) / rem;
+    if needed - last_lap >= 2.0 {
+        "Hai margine su chi ti segue: porta a casa la posizione".into()
+    } else {
+        format!("Per tenere la posizione basta girare in {}", say_time(needed))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -587,5 +730,16 @@ mod tests {
         assert_eq!(say_delta(-1.26), "meno 1 e 3");
         assert_eq!(say_gap(0.8), "8 decimi");
         assert_eq!(say_gap(1.24), "1 e 2");
+    }
+    #[test]
+    fn stratega() {
+        assert_eq!(closing(&[3.0, 2.5, 2.0]), Some(0.5));
+        assert_eq!(msg_behind(2.0, 0.5, Some(10)).unwrap(), "L'auto dietro recupera 5 decimi a giro: ti prende in 4 giri");
+        assert_eq!(msg_behind(2.0, 0.5, Some(2)).unwrap(), "L'auto dietro recupera 5 decimi a giro, ma non ti prende prima della fine");
+        assert!(msg_behind(2.0, 0.1, None).is_none());
+        assert_eq!(msg_ahead(1.5, 0.4, Some(8)).unwrap(), "Recuperi 4 decimi a giro su chi ti precede: lo prendi in 3 giri");
+        assert!(msg_ahead(5.0, 0.3, Some(3)).is_none());
+        assert_eq!(msg_endgame(1.5, 0.2, 3, 106.0), "Per tenere la posizione basta girare in 1 minuto 46 e 2");
+        assert_eq!(msg_endgame(10.0, 0.0, 2, 106.0), "Hai margine su chi ti segue: porta a casa la posizione");
     }
 }
