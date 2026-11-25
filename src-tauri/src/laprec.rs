@@ -122,6 +122,8 @@ pub struct LapRec {
     my_lap_samples: Option<Vec<Sample>>,
     /// telemetria del tuo giro pulito più veloce della sessione: (giro, tempo ms, dati)
     best_tel: Option<(i32, f64, serde_json::Value)>,
+    /// C4: telemetria dei tuoi 3 giri puliti più veloci (giro, tempo ms, dati), per confrontarli sul sito
+    top_tel: Vec<(i32, f64, serde_json::Value)>,
     changed: bool,
     sent_at: Option<Instant>,
 }
@@ -317,6 +319,15 @@ impl LapRec {
                             if let Some(d) = data.as_ref() {
                                 self.coach(d, last * 1000.0);
                             }
+                            // C4: i 3 giri puliti più veloci con la loro telemetria
+                            if let Some(d) = data.as_ref() {
+                                let ms = last * 1000.0;
+                                if self.top_tel.len() < 3 || self.top_tel.iter().any(|t| ms < t.1) {
+                                    self.top_tel.push((n, ms, d.clone()));
+                                    self.top_tel.sort_by(|a, b| a.1.total_cmp(&b.1));
+                                    self.top_tel.truncate(3);
+                                }
+                            }
                             let better = self.best_tel.as_ref().map(|b| last * 1000.0 < b.1).unwrap_or(true);
                             if better {
                                 if let Some(data) = data {
@@ -377,6 +388,7 @@ impl LapRec {
             "cars": self.cars.values().filter(|c| !c.laps.is_empty()).collect::<Vec<_>>(),
             // telemetria del tuo giro pulito più veloce (per la pagina Telemetria)
             "telemetry": self.best_tel.as_ref().map(|(n, ms, data)| serde_json::json!({ "n": n, "ms": ms, "custId": self.my_cust, "data": data })),
+            "telemetries": self.top_tel.iter().map(|(n, ms, data)| serde_json::json!({ "n": n, "ms": ms, "custId": self.my_cust, "data": data })).collect::<Vec<_>>(),
         })
     }
 

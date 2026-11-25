@@ -465,13 +465,14 @@ function buildRadarBars(it: Item): View {
 
 // ——— Coach in overlay (bozza v1 approvata): Curve, Frenata, Gas e freno ———
 type CoachView = {
-  rev: number; who: string; total: number | null; cur: number; loss: (number | null)[];
+  rev: number; who: string; total: number | null; cur: number; loss: (number | null)[]; zones?: [number, number][];
   next: { n: number; distM: number; now: boolean; gear: number; minSpd: number; lastDiffM: number | null } | null;
 };
 const demoCoach = (t: number): CoachView => {
   const ph = (t / 6000) % 1;
   return {
     rev: 1, who: "", total: 0.21, cur: 5, loss: [-0.04, 0.12, -0.02, 0.18, -0.09, -0.01, null, null, null, null, null, null],
+    zones: [[0.05, 0.1], [0.14, 0.2], [0.24, 0.3], [0.34, 0.4], [0.44, 0.5], [0.54, 0.6], [0.64, 0.7], [0.72, 0.76], [0.8, 0.84], [0.86, 0.9], [0.92, 0.95], [0.96, 0.99]],
     next: { n: 7, distM: ph < 0.7 ? Math.round(200 - ph * 280) : 0, now: ph >= 0.7, gear: 3, minSpd: 92, lastDiffM: -6 },
   };
 };
@@ -732,7 +733,10 @@ const BUILDERS: Record<string, (it: Item) => View> = {
     const v = buildMappa(it);
     return {
       el: v.el,
-      update: (f, s, cars) => v.update(cars ?? null, { me: (s ?? lastSlow)?.me ?? -1, progress: (s ?? lastSlow)?.mapProgress ?? null, pct: f.lapPct, yaw: f.yaw, onTrack: f.onTrack && live }),
+      update: (f, s, cars) => {
+        const c = coachOf(f);
+        v.update(cars ?? null, { me: (s ?? lastSlow)?.me ?? -1, progress: (s ?? lastSlow)?.mapProgress ?? null, pct: f.lapPct, yaw: f.yaw, onTrack: f.onTrack && live, zones: c?.zones, loss: c?.loss });
+      },
     };
   },
 };

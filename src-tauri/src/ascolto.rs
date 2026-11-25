@@ -73,6 +73,13 @@ pub const FRASI: &[(&str, &str)] = &[
     ("come vanno gli altri", "passo"),
     ("soste", "soste"),
     ("quante soste", "soste"),
+    // Coach e passo
+    ("gomme", "gomme"),
+    ("come sono le gomme", "gomme"),
+    ("usura gomme", "gomme"),
+    ("risparmio", "risparmio"),
+    ("come risparmio benzina", "risparmio"),
+    ("quanto devo risparmiare", "risparmio"),
 ];
 
 /// Stato mostrato nella scheda Voce

@@ -215,6 +215,12 @@ pub struct Engineer {
     declared_said: bool,
     temps: Vec<(Instant, f32)>,
     temp_said: Option<Instant>,
+    // F17 · gomme: giri buoni dello stint (si riparte all'uscita dai box)
+    stint: Vec<f32>,
+    was_pit: bool,
+    tyre_said: bool,
+    // D7 · ultimo giro in cui si è detto il risparmio
+    save_said_lap: i32,
 }
 
 impl Engineer {
@@ -337,6 +343,11 @@ impl Engineer {
         self.push(text, false);
     }
 
+    /// F17 · quanto sono calate le gomme: secondi a giro rispetto all'inizio dello stint (dopo 6 giri)
+    pub fn tyre_drop(&self) -> Option<(f32, usize)> {
+        tyre_drop(&self.stint).map(|d| (d, self.stint.len()))
+    }
+
     /// P12 · andamento del passo: ultimi 3 giri buoni contro i tuoi 3 migliori
     fn pace_lap(&mut self, t: &Tele) {
         if t.last_lap <= 0.0 || t.on_pit_road {
@@ -348,6 +359,14 @@ impl Engineer {
             return;
         }
         self.lap_times.push(t.last_lap);
+        self.stint.push(t.last_lap);
+        // F17 · gomme che calano (una volta per stint)
+        if let Some(d) = tyre_drop(&self.stint) {
+            if d >= 0.8 && !self.tyre_said {
+                self.tyre_said = true;
+                self.push(format!("Le gomme calano: {} più lento di inizio stint", say_gap(d)), false);
+            }
+        }
         if let Some(text) = msg_pace(&self.lap_times) {
             if self.laps_done - self.pace_said_lap >= 5 {
                 self.pace_said_lap = self.laps_done;
@@ -403,6 +422,13 @@ impl Engineer {
                 self.pace_said.retain(|(n, _)| n != num);
                 self.pace_said.push((num.clone(), self.laps_done));
                 self.push(format!("Il {num} {where_} sta calando: {} più lento dei suoi giri migliori", say_gap(drop)), false);
+            }
+        }
+        // D7 · risparmio benzina: ogni 5 giri, quando basta risparmiare per evitare la sosta
+        if self.laps_done - self.save_said_lap >= 5 {
+            if let Some(text) = Engineer::save_text(t).filter(|x| x.starts_with("Per non fermarti")) {
+                self.save_said_lap = self.laps_done;
+                self.push(text, false);
             }
         }
         // E4 · finestra per la sosta: a ogni giro dentro la finestra, se rientri in aria libera o nel traffico
@@ -492,6 +518,10 @@ impl Engineer {
             declared_said: false,
             temps: Vec::new(),
             temp_said: None,
+            stint: Vec::new(),
+            was_pit: false,
+            tyre_said: false,
+            save_said_lap: -99,
         }
     }
 
@@ -511,6 +541,13 @@ impl Engineer {
             self.speak_if_possible(t); // i messaggi del team si dicono comunque
             return;
         }
+
+        // F17 · uscita dai box: nuovo stint (gomme nuove)
+        if self.was_pit && !t.on_pit_road && t.on_track {
+            self.stint.clear();
+            self.tyre_said = false;
+        }
+        self.was_pit = t.on_pit_road;
 
         // ——— Fine di un giro ———
         if t.lap_completed > self.prev_lap && self.prev_lap >= 0 && t.on_track {
@@ -735,6 +772,38 @@ impl Engineer {
                 }
             }
         }
+    }
+
+    /// D7 · risparmio benzina: quanto risparmiare a giro per non fermarsi e dove alzare il piede
+    pub fn save_text(t: &Tele) -> Option<String> {
+        let per = t.fuel_per_lap.filter(|p| *p > 0.05)?;
+        let remain = t.laps_remain.map(|r| r as f32).or_else(|| match (t.time_remain, t.best_lap > 0.0) {
+            (Some(sec), true) => Some((sec as f32 / t.best_lap).ceil() + 1.0),
+            _ => None,
+        })?;
+        let need = (remain + 0.3) * per - t.fuel_l;
+        if need <= 0.0 {
+            return Some("La benzina basta: non serve risparmiare".into());
+        }
+        let target = t.fuel_l / (remain + 0.3);
+        let save = per - target;
+        if target / per < 0.75 {
+            return Some("Troppa benzina da risparmiare: meglio fermarsi".into());
+        }
+        let litres = (save * 10.0).ceil() / 10.0;
+        let amount = if litres < 1.0 { format!("{} decimi di litro", (litres * 10.0).round() as i32) } else { format!("{} litri", format!("{litres:.1}").replace('.', " e ")) };
+        let base = format!("Per non fermarti risparmia {amount} a giro");
+        Some(match crate::coach::lift_plan(save, per) {
+            Some((m, corners)) => {
+                let list = corners.iter().map(|c| c.to_string()).collect::<Vec<_>>();
+                let cs = match list.len() {
+                    1 => format!("della curva {}", list[0]),
+                    _ => format!("delle curve {} e {}", list[..list.len() - 1].join(", "), list[list.len() - 1]),
+                };
+                format!("{base}: alza il piede {m} metri prima {cs}")
+            }
+            None => base,
+        })
     }
 
     /// Parla solo se non ci sono auto affiancate e si è in rettilineo (o fermi ai box), con una pausa tra i messaggi
@@ -964,6 +1033,20 @@ fn strategia_window(lap: i32, remain: f32, fuel: f32, per: f32, tank: f32) -> Op
     crate::strategia::pit_window(lap, remain, fuel, per, tank)
 }
 
+// ——— F17 · gomme ———
+
+/// Media degli ultimi 3 giri dello stint meno la media dei 3 migliori dei primi 6 (da 6 giri in su)
+fn tyre_drop(stint: &[f32]) -> Option<f32> {
+    if stint.len() < 6 {
+        return None;
+    }
+    let mut first: Vec<f32> = stint[..6].to_vec();
+    first.sort_by(|a, b| a.total_cmp(b));
+    let base = first[..3].iter().sum::<f32>() / 3.0;
+    let last3 = stint[stint.len() - 3..].iter().sum::<f32>() / 3.0;
+    Some(last3 - base)
+}
+
 // ——— P12 · andamento del passo ———
 
 /// «Passo in calo»: media degli ultimi 3 giri buoni contro la media dei 3 migliori (almeno 6 giri)
@@ -1067,6 +1150,12 @@ mod tests {
         let t = Tele { ahead_num: "7".into(), behind_num: "12".into(), ahead_pace: Some((106.2, None)), behind_pace: Some((105.8, Some(0.2))), my_stops: Some(0), ahead_stops: Some(1), behind_stops: Some(0), ..Default::default() };
         assert_eq!(answer(&t, "passo"), "Davanti il 7 gira in 1 minuto 46 e 2, dietro il 12 in 1 minuto 45 e 8");
         assert_eq!(answer(&t, "soste"), "Hai fatto 0 soste, il 7 davanti 1, il 12 dietro 0");
+    }
+    #[test]
+    fn gomme() {
+        assert!(tyre_drop(&[100.0, 100.1, 100.2]).is_none());
+        let d = tyre_drop(&[100.0, 100.1, 100.0, 100.2, 100.3, 100.4, 100.8, 100.9, 101.0]).unwrap();
+        assert!((d - 0.867).abs() < 0.01, "{d}");
     }
     #[test]
     fn passo() {

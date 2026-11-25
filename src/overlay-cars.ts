@@ -450,7 +450,7 @@ export function demoMap(): TrackMap {
   return { key: "demo", points };
 }
 
-export type MapInfo = { me: number; progress: number | null; pct: number; yaw: number; onTrack: boolean };
+export type MapInfo = { me: number; progress: number | null; pct: number; yaw: number; onTrack: boolean; zones?: [number, number][]; loss?: (number | null)[] };
 
 export function buildMappa(it: Item): { el: HTMLElement; update: (cars: Car[] | null, info: MapInfo) => void } {
   const o = (k: string) => opt(it, "mappa", k);
@@ -463,7 +463,11 @@ export function buildMappa(it: Item): { el: HTMLElement; update: (cars: Car[] | 
   const finish = document.createElementNS(NS, "line");
   finish.setAttribute("class", "finish");
   const dotsG = document.createElementNS(NS, "g");
-  svg.append(track, finish, dotsG);
+  // D5: tratti colorati dove guadagni o perdi sul riferimento del Coach
+  const lossG = document.createElementNS(NS, "g");
+  lossG.setAttribute("class", "lossg");
+  let lossKey = "";
+  svg.append(track, lossG, finish, dotsG);
   const msg = document.createElement("div");
   msg.className = "msg";
   el.append(svg, msg);
@@ -499,6 +503,7 @@ export function buildMappa(it: Item): { el: HTMLElement; update: (cars: Car[] | 
     finish.setAttribute("x2", String(ax + nx)); finish.setAttribute("y2", String(ay + ny));
     finish.style.display = o("finish") ? "" : "none";
     dotsG.innerHTML = "";
+    lossKey = "";
   }
 
   const at = (m: TrackMap, pct: number): [number, number] => {
@@ -542,6 +547,25 @@ export function buildMappa(it: Item): { el: HTMLElement; update: (cars: Car[] | 
           ? `Sto disegnando la pista: ${Math.round(info.progress * 100)}% del giro. Resta in pista fino al traguardo.`
           : "La mappa si disegna da sola al tuo primo giro pulito (anche in prova): esci dai box e fai un giro completo.";
         return;
+      }
+      // D5: tratti colorati (si ridisegnano solo quando cambiano)
+      const lk = o("loss") && info.zones && info.loss ? JSON.stringify([m.key, mapVersion, info.zones, info.loss]) : "";
+      if (lk !== lossKey) {
+        lossKey = lk;
+        lossG.innerHTML = "";
+        if (lk && info.zones && info.loss) {
+          const n = m.points.length;
+          info.zones.forEach(([s, e], i) => {
+            const l = info.loss![i];
+            if (l == null) return;
+            const a = Math.floor(s * n), b = Math.min(n - 1, Math.ceil(e * n));
+            const d = m.points.slice(a, b + 1).map((p, k) => { const [x, y] = tf(p); return `${k ? "L" : "M"}${x.toFixed(1)},${y.toFixed(1)}`; }).join("");
+            const path = document.createElementNS(NS, "path");
+            path.setAttribute("d", d);
+            path.setAttribute("class", l < 0 ? "gain" : "lose");
+            lossG.append(path);
+          });
+        }
       }
       if (`${m.key}#${mapVersion}` !== drawnKey) {
         drawnKey = `${m.key}#${mapVersion}`;

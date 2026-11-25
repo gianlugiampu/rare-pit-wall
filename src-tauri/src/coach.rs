@@ -305,6 +305,8 @@ pub struct View {
     pub cur: i32,
     pub loss: Vec<Option<f32>>,
     pub next: Option<NextBrake>,
+    /// D5: curve (inizio, fine) in frazioni di giro, per colorare la mappa
+    pub zones: Vec<(f32, f32)>,
 }
 
 #[derive(serde::Serialize, Clone, Default)]
@@ -389,6 +391,7 @@ impl Live {
             cur,
             loss: self.loss.clone(),
             next,
+            zones: plan.zones.iter().map(|z| (z.s as f32, z.e as f32)).collect(),
         }
     }
 }
@@ -435,6 +438,34 @@ fn beep(kind: u8, vol: f32) {
     if let Some(tx) = b.as_ref() {
         let _ = tx.send((kind, vol));
     }
+}
+
+/// D7 · risparmio benzina: per risparmiare `save` litri a giro (consumo `per`), quanti metri alzare il piede prima
+/// delle frenate più forti del riferimento. Restituisce (metri, curve). Stima: un metro senza gas risparmia
+/// circa 1,2 volte il consumo medio di un metro di pista.
+pub fn lift_plan(save: f32, per: f32) -> Option<(i32, Vec<usize>)> {
+    let p = current_plan()?;
+    if save <= 0.0 || per <= 0.0 || p.len_m <= 0.0 {
+        return None;
+    }
+    let n = p.lap.n;
+    let idx = |pct: f64| ((pct * (n - 1) as f64).round() as usize).min(n - 1);
+    // le frenate più forti: più velocità persa dal punto di frenata alla minima
+    let mut z: Vec<(usize, f64)> = p.zones.iter().enumerate().filter_map(|(i, z)| z.brake.map(|b| (i + 1, p.lap.spd[idx(b)] - z.min_spd))).collect();
+    z.sort_by(|a, b| b.1.total_cmp(&a.1));
+    z.truncate(4);
+    if z.is_empty() {
+        return None;
+    }
+    let per_m = per as f64 / p.len_m * 1.2;
+    let total = save as f64 / per_m;
+    let each = ((total / z.len() as f64) / 10.0).round() * 10.0;
+    if each > 150.0 {
+        return None; // troppo: meglio fermarsi
+    }
+    let mut corners: Vec<usize> = z.iter().map(|x| x.0).collect();
+    corners.sort();
+    Some((each.max(10.0) as i32, corners))
 }
 
 /// Riferimento per l'overlay «Gas e freno» (gas e freno del riferimento, punti alla stessa distanza)

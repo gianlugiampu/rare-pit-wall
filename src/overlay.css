@@ -239,3 +239,8 @@ body.light *, body.light *::before, body.light *::after { animation: none !impor
 .tr-leg i { display: inline-block; width: 14px; height: 2px; vertical-align: middle; margin-right: 4px; }
 .tr-leg i.dash { background: repeating-linear-gradient(90deg, #c9c2d4 0 4px, transparent 4px 7px); }
 
+/* D5 · mappa: tratti dove guadagni o perdi sul riferimento */
+.lossg path { fill: none; stroke-width: 5; stroke-linecap: round; opacity: .9; }
+.lossg path.gain { stroke: var(--lap-pb); }
+.lossg path.lose { stroke: var(--lap-invalid); }
+

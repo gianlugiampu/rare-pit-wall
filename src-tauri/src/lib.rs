@@ -673,6 +673,14 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                     if let Some(what) = ask {
                         let text = match what.as_str() {
                             "ripeti" => eng.last_text(),
+                            // F17 · gomme
+                            "gomme" => match eng.tyre_drop() {
+                                Some((d, n)) if d >= 0.2 => format!("Gomme: dopo {n} giri sei {} decimi più lento di inizio stint", (d * 10.0).round() as i32),
+                                Some((_, n)) => format!("Gomme ancora buone dopo {n} giri"),
+                                None => "Per le gomme servono almeno 6 giri dello stint".into(),
+                            },
+                            // D7 · risparmio benzina
+                            "risparmio" => engineer::Engineer::save_text(&tele).unwrap_or_else(|| "Il consumo lo so dopo un paio di giri".into()),
                             "coach" => coach::LAST.lock().unwrap().clone().unwrap_or_else(|| "Nessun consiglio per ora: fai qualche giro pulito in prova".into()),
                             _ => engineer::answer(&tele, &what),
                         };
