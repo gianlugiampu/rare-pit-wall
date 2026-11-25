@@ -17,6 +17,9 @@ pub struct Moment {
     pub text: String,
     pub lap: i32,
     pub t: f64,
+    /// F23: punto della pista (frazione di giro) dei sorpassi, per l'allenatore di sorpasso del sito
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pct: Option<f32>,
 }
 
 /// Elenco della gara salvato sul PC (per «Vai al momento» anche dopo)
@@ -119,12 +122,19 @@ impl Detector {
     }
 
     fn add(&mut self, key: String, kind: &str, car: usize, text: String, lap: i32, t: f64) {
-        let m = Moment { key, kind: kind.into(), car: self.label(car), car_number: self.number(car), text, lap, t };
+        let m = Moment { key, kind: kind.into(), car: self.label(car), car_number: self.number(car), text, lap, t, pct: None };
         match self.race.moments.iter_mut().find(|x| x.key == m.key) {
             Some(x) => *x = m,
             None => self.race.moments.push(m),
         }
         self.dirty = true;
+    }
+
+    /// F23: punto della pista di un momento
+    fn set_pct(&mut self, key: &str, pct: Option<f32>) {
+        if let Some(m) = self.race.moments.iter_mut().find(|m| m.key == key) {
+            m.pct = pct;
+        }
     }
 
     /// V3 · «segna questo momento»: un momento della tua auto all'istante, per rivederlo e farne una clip
@@ -204,10 +214,15 @@ impl Detector {
                             self.order.insert((a, b), (sign, since, true));
                             if clean {
                                 let other = self.label(b);
+                                let at = Some(prog[a].fract());
                                 if sign > 0 {
-                                    self.add(format!("ov-{a}-{b}-{lap_a}"), "overtake", a, format!("sorpasso su {other}"), lap_a, since);
+                                    let k = format!("ov-{a}-{b}-{lap_a}");
+                                    self.add(k.clone(), "overtake", a, format!("sorpasso su {other}"), lap_a, since);
+                                    self.set_pct(&k, at);
                                 } else if !team.contains(&b) {
-                                    self.add(format!("lo-{a}-{b}-{lap_a}"), "lost", a, format!("superato da {other}"), lap_a, since);
+                                    let k = format!("lo-{a}-{b}-{lap_a}");
+                                    self.add(k.clone(), "lost", a, format!("superato da {other}"), lap_a, since);
+                                    self.set_pct(&k, at);
                                 }
                             }
                         }
