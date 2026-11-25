@@ -15,7 +15,7 @@ type AppState = { paired: boolean; driver: string | null; version: string; statu
 
 type Moment = { key: string; kind: string; car: string; carNumber: string; text: string; lap: number; t: number };
 type RaceMoments = { subsession: number; sessionNum: number; track: string; moments: Moment[] };
-const ICON: Record<string, string> = { start: "🚦", overtake: "⬆️", lost: "⬇️", offtrack: "⚠️", incident: "💥", fastlap: "⏱️", fastest: "🟣", battle: "⚔️", lastlap: "🏳️", finish: "🏁" };
+const ICON: Record<string, string> = { start: "🚦", overtake: "⬆️", lost: "⬇️", offtrack: "⚠️", incident: "💥", fastlap: "⏱️", fastest: "🟣", battle: "⚔️", lastlap: "🏳️", finish: "🏁", mark: "📌" };
 
 let lastRace: RaceMoments | null = null;
 async function loadMoments() {

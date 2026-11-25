@@ -70,7 +70,32 @@ pub struct Tele {
     /// P13: auto davanti e dietro in classifica (indice iRacing, -1 = nessuna)
     pub ahead_idx: i32,
     pub behind_idx: i32,
+    /// V2: compagno di squadra più vicino in classifica (distacco: + = è davanti a te), posizione e numero
+    pub mate_gap: Option<f32>,
+    pub mate_pos: i32,
+    pub mate_num: String,
+    /// V2: temperature (gradi)
+    pub track_temp: Option<f32>,
+    pub air_temp: Option<f32>,
+    /// P13: dove rientri se ti fermi adesso
+    pub rejoin: Option<Rejoin>,
+    /// P13: auto di una classe più veloce dietro di te in pista (secondi)
+    pub faster_behind: Option<f32>,
 }
+
+/// P13 · rientro dopo una sosta fatta adesso
+#[derive(Default, Clone)]
+pub struct Rejoin {
+    pub pos: i32,
+    pub ahead: Option<(String, f32)>,
+    pub behind: Option<(String, f32)>,
+    /// secondi persi con la sosta e se sono imparati dalle soste viste (altrimenti stima)
+    pub loss: f32,
+    pub learned: bool,
+}
+
+/// V3 · «silenzio»: fino a quando Serena dice solo le cose importanti
+pub static QUIET: std::sync::Mutex<Option<Instant>> = std::sync::Mutex::new(None);
 
 // Bandiere di iRacing (SessionFlags)
 const YELLOW: u32 = 0x8;
@@ -90,6 +115,8 @@ struct Output {
     volume: f32,
     /// P5: messaggi del team dal pit wall (restano anche se cambia la sessione)
     radio: VecDeque<(String, Instant)>,
+    /// V2: ultima frase detta (per «ripeti»)
+    last: String,
 }
 
 impl Output {
@@ -101,6 +128,7 @@ impl Output {
         }
     }
     fn speak(&mut self, text: &str, interrupt: bool) -> bool {
+        self.last = text.to_string();
         if self.serena {
             if let Some(p) = self.piper.as_ref() {
                 p.speak(text, self.volume);
@@ -158,12 +186,14 @@ pub struct Engineer {
     // P12 · andamento del passo
     lap_times: Vec<f32>,
     pace_said_lap: i32,
+    // P13 · auto più veloci in arrivo
+    faster_said: Option<Instant>,
 }
 
 impl Engineer {
     /// `dir`: cartella dove si scarica la voce Serena
     pub fn new(dir: PathBuf) -> Engineer {
-        Engineer::new_with(Output { tts: tts::Tts::default().ok(), piper: None, dir, serena: false, volume: 0.8, radio: VecDeque::new() }, None)
+        Engineer::new_with(Output { tts: tts::Tts::default().ok(), piper: None, dir, serena: false, volume: 0.8, radio: VecDeque::new(), last: String::new() }, None)
     }
 
     /// Voci italiane per prime (le altre servono poco)
@@ -236,6 +266,15 @@ impl Engineer {
     fn push_urgent(&mut self, text: String) {
         self.queue.retain(|m| !m.urgent);
         self.queue.push_front(Msg { text, important: true, urgent: true, at: Instant::now() });
+    }
+
+    /// V2: ultima frase detta (per «ripeti»)
+    pub fn last_text(&self) -> String {
+        if self.out.last.is_empty() {
+            "Non ho ancora detto niente".into()
+        } else {
+            self.out.last.clone()
+        }
     }
 
     /// P13 · dati per l'overlay «Stratega» (stessi calcoli degli avvisi a voce)
@@ -332,7 +371,7 @@ impl Engineer {
     }
 
     fn reset(&mut self, session: &str) {
-        let out = std::mem::replace(&mut self.out, Output { tts: None, piper: None, dir: PathBuf::new(), serena: false, volume: 0.8, radio: VecDeque::new() });
+        let out = std::mem::replace(&mut self.out, Output { tts: None, piper: None, dir: PathBuf::new(), serena: false, volume: 0.8, radio: VecDeque::new(), last: String::new() });
         let applied = self.applied.take();
         *self = Engineer::new_with(out, applied);
         self.session = session.to_string();
@@ -373,6 +412,7 @@ impl Engineer {
             slow_said: None,
             lap_times: Vec::new(),
             pace_said_lap: -99,
+            faster_said: None,
         }
     }
 
@@ -428,6 +468,15 @@ impl Engineer {
                     if self.slow_said.map_or(true, |at| at.elapsed() > Duration::from_secs(20)) {
                         self.slow_said = Some(Instant::now());
                         self.push_urgent(format!("Attenzione, auto ferma davanti a {} metri", ((m / 50.0).round() * 50.0).max(50.0) as i32));
+                    }
+                }
+            }
+            // P13: auto di una classe più veloce in arrivo da dietro (multiclasse), al massimo ogni 45 secondi
+            if s.strategy && t.on_track && !t.on_pit_road {
+                if let Some(g) = t.faster_behind.filter(|g| *g < 6.0) {
+                    if self.faster_said.map_or(true, |at| at.elapsed() > Duration::from_secs(45)) {
+                        self.faster_said = Some(Instant::now());
+                        self.push(format!("Auto più veloci in arrivo, a {} secondi", g.round().max(1.0) as i32), true);
                     }
                 }
             }
@@ -591,6 +640,10 @@ impl Engineer {
                 return;
             }
         }
+        // V3 · «silenzio»: solo le cose importanti
+        if QUIET.lock().unwrap().is_some_and(|until| Instant::now() < until) {
+            self.queue.retain(|m| m.important);
+        }
         let urgent = self.queue.front().is_some_and(|m| m.urgent && m.at.elapsed() < Duration::from_secs(8));
         self.queue.retain(|m| !m.urgent || m.at.elapsed() < Duration::from_secs(8));
         if self.last_end.elapsed() < Duration::from_millis(if urgent { 300 } else { 3000 }) {
@@ -703,6 +756,41 @@ pub fn answer(t: &Tele, what: &str) -> String {
             }
             capitalize(&s)
         }
+        // V2 · distacco dal compagno di squadra più vicino in classifica
+        "compagno" => match (t.mate_gap, t.mate_pos) {
+            (Some(g), p) if p > 0 => {
+                let num = if t.mate_num.is_empty() { String::new() } else { format!(", il {},", t.mate_num) };
+                if g > 0.0 {
+                    format!("Il compagno{num} è P{p}, davanti a {}", say_gap(g))
+                } else {
+                    format!("Il compagno{num} è P{p}, dietro a {}", say_gap(-g))
+                }
+            }
+            _ => "Nessun compagno in questa sessione".into(),
+        },
+        // V2 · temperature
+        "meteo" => match (t.track_temp, t.air_temp) {
+            (Some(tr), Some(a)) => format!("Pista {} gradi, aria {}", tr.round() as i32, a.round() as i32),
+            (Some(tr), None) => format!("Pista {} gradi", tr.round() as i32),
+            _ => "Temperature non disponibili".into(),
+        },
+        // P13 · dove rientri se ti fermi adesso
+        "box" => match &t.rejoin {
+            Some(r) => {
+                let mut s = format!("Se ti fermi ora rientri P{}", r.pos);
+                if let Some((n, g)) = &r.ahead {
+                    s += &format!(", dietro al {n} di {}", say_gap(*g));
+                }
+                if let Some((n, g)) = &r.behind {
+                    s += &format!(", davanti al {n} di {}", say_gap(*g));
+                }
+                if !r.learned {
+                    s += &format!(". Stima con {} secondi di sosta", r.loss.round() as i32);
+                }
+                s
+            }
+            None => "Il rientro dopo il box lo calcolo in gara".into(),
+        },
         _ => String::new(),
     }
 }
@@ -717,6 +805,8 @@ fn say_gap(g: f32) -> String {
     let tenths = (g.abs() * 10.0).round() as i32;
     if tenths < 10 {
         format!("{} decim{}", tenths.max(1), if tenths <= 1 { "o" } else { "i" })
+    } else if tenths % 10 == 0 {
+        format!("{} second{}", tenths / 10, if tenths == 10 { "o" } else { "i" })
     } else {
         format!("{} e {}", tenths / 10, tenths % 10)
     }
@@ -812,6 +902,13 @@ mod tests {
         assert_eq!(say_delta(-1.26), "meno 1 e 3");
         assert_eq!(say_gap(0.8), "8 decimi");
         assert_eq!(say_gap(1.24), "1 e 2");
+    }
+    #[test]
+    fn risposte_v2() {
+        let t = Tele { mate_gap: Some(-2.4), mate_pos: 8, mate_num: "22".into(), track_temp: Some(31.4), air_temp: Some(22.2), rejoin: Some(Rejoin { pos: 9, ahead: Some(("33".into(), 2.0)), behind: Some(("4".into(), 1.5)), loss: 25.0, learned: false }), ..Default::default() };
+        assert_eq!(answer(&t, "compagno"), "Il compagno, il 22, è P8, dietro a 2 e 4");
+        assert_eq!(answer(&t, "meteo"), "Pista 31 gradi, aria 22");
+        assert_eq!(answer(&t, "box"), "Se ti fermi ora rientri P9, dietro al 33 di 2 secondi, davanti al 4 di 1 e 5. Stima con 25 secondi di sosta");
     }
     #[test]
     fn passo() {

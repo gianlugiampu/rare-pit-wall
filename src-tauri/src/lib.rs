@@ -11,6 +11,7 @@ mod engineer;
 mod irsdk;
 mod laprec;
 mod live;
+mod strategia;
 mod moments;
 mod overlay;
 mod trackmap;
@@ -28,6 +29,8 @@ use tauri::{
 
 /// Domanda fatta con un comando rapido («benzina», «distacchi», «posizione», «tempi»): la dice l'ingegnere
 pub static ASK: Mutex<Option<String>> = Mutex::new(None);
+/// V3 · «segna questo momento» (lo prende il rilevatore dei momenti)
+pub static MARK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// Frase da dire subito (es. «Delta sul migliore della sessione» dopo il comando rapido)
 static SAY_TEXT: Mutex<Option<String>> = Mutex::new(None);
 /// P9: il programma, per chi deve eseguire un comando da un altro thread (comandi a voce)
@@ -321,6 +324,8 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
         let mut cur_yaml = String::new();
         // P13: lunghezza della pista e posizioni delle auto nell'ultimo secondo (per le auto ferme davanti)
         let mut track_len_m: f32 = 0.0;
+        // P13: tempo perso con una sosta, imparato dalle soste delle altre auto
+        let mut pit_learn = strategia::PitLearn::default();
         let mut pct_hist: std::collections::VecDeque<Vec<f32>> = Default::default();
         let (mut subsession, mut session_num, mut official) = (String::new(), 0, false);
         let mut sent: std::collections::HashSet<String> = Default::default();
@@ -406,6 +411,7 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                             }
                         }
                         let team_ids = shared.team_ids.lock().unwrap().clone();
+                        pit_learn.reset();
                         laprec = Some(laprec::LapRec::start(&cur_yaml, subsession.parse().unwrap_or(0), &session, &team_ids, tracker.car_idx.max(0) as usize));
                         fetch_team(&app, shared.clone());
                         *shared.live_event.lock().unwrap() = None;
@@ -503,11 +509,24 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                     let me = s.get("PlayerCarIdx").map(|v| v.as_i32()).unwrap_or(-1);
                     let (mut gap_ahead, mut gap_behind) = (None, None);
                     let (mut ahead_idx, mut behind_idx) = (-1, -1);
+                    let mut others: Vec<(String, i32, f32)> = vec![];
+                    let (mut mate_gap, mut mate_pos, mut mate_num) = (None, 0, String::new());
+                    let mut my_f2_all = 0.0f32;
                     if me >= 0 && st.position > 0 {
                         let my_f2 = s.get_at("CarIdxF2Time", me as usize).map(|v| v.as_f64() as f32).unwrap_or(0.0);
                         for i in 0..64 {
                             let Some(p) = s.get_at("CarIdxPosition", i).map(|v| v.as_i32()) else { break };
                             let f2 = s.get_at("CarIdxF2Time", i).map(|v| v.as_f64() as f32).unwrap_or(0.0);
+                            my_f2_all = my_f2;
+                            if i != me as usize && p > 0 {
+                                if let Some((num, _, _, rare)) = overlay::car_brief(i) {
+                                    // V2: il compagno più vicino in classifica
+                                    if rare && (mate_pos == 0 || (p - st.position).abs() < (mate_pos - st.position).abs()) {
+                                        (mate_gap, mate_pos, mate_num) = (Some(my_f2 - f2), p, num.clone());
+                                    }
+                                    others.push((num, p, f2));
+                                }
+                            }
                             if p == st.position - 1 {
                                 gap_ahead = Some(my_f2 - f2).filter(|g| *g > 0.0 && *g < 600.0);
                                 ahead_idx = i as i32;
@@ -519,6 +538,7 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                     }
                     // P13: auto ferma o lentissima in pista davanti (entro 800 m), dalle posizioni di un secondo fa
                     let mut slow_ahead_m: Option<f32> = None;
+                    let mut faster_behind: Option<f32> = None;
                     if me >= 0 && track_len_m > 0.0 {
                         let pcts: Vec<f32> = (0..64).map(|i| s.get_at("CarIdxLapDistPct", i).map(|v| v.as_f64() as f32).unwrap_or(-1.0)).collect();
                         if pct_hist.len() >= 20 {
@@ -547,6 +567,30 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                                 let m = d * track_len_m;
                                 if m > 30.0 && m < 800.0 {
                                     slow_ahead_m = Some(slow_ahead_m.map_or(m, |x| x.min(m)));
+                                }
+                            }
+                        }
+                        // P13: auto di una classe più veloce dietro di te in pista (entro il 20% del giro)
+                        let my_class = overlay::car_brief(me as usize).map(|c| (c.1, c.2));
+                        if let Some((my_cls, my_lap)) = my_class.filter(|c| c.1 > 0.0) {
+                            for i in 0..64 {
+                                if i == me as usize || pcts[i] < 0.0 || pcts[me as usize] < 0.0 {
+                                    continue;
+                                }
+                                let Some((_, cls, lap, _)) = overlay::car_brief(i) else { continue };
+                                if cls == my_cls || lap <= 0.0 || lap > my_lap - 1.0 {
+                                    continue;
+                                }
+                                if s.get_at("CarIdxOnPitRoad", i).map(|v| v.as_bool()).unwrap_or(false) {
+                                    continue;
+                                }
+                                let mut d = pcts[me as usize] - pcts[i];
+                                if d < 0.0 {
+                                    d += 1.0;
+                                }
+                                if d < 0.2 {
+                                    let secs = d * lap; // tempo che gli serve per arrivare dove sei tu
+                                    faster_behind = Some(faster_behind.map_or(secs, |x: f32| x.min(secs)));
                                 }
                             }
                         }
@@ -582,13 +626,28 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         slow_ahead_m,
                         ahead_idx,
                         behind_idx,
+                        mate_gap,
+                        mate_pos,
+                        mate_num,
+                        track_temp: s.get("TrackTempCrew").or_else(|| s.get("TrackTemp")).map(|v| v.as_f64() as f32),
+                        air_temp: s.get("AirTemp").map(|v| v.as_f64() as f32),
+                        rejoin: (session == "Race" && st.position > 0).then(|| {
+                            let (loss, learned) = pit_learn.loss().map(|l| (l, true)).unwrap_or((25.0, false));
+                            let (pos, ahead, behind) = strategia::rejoin(my_f2_all, loss, &others);
+                            engineer::Rejoin { pos, ahead, behind, loss, learned }
+                        }),
+                        faster_behind,
                     };
                     let settings = shared.engineer.lock().unwrap().clone();
                     eng.update(&tele, &settings);
                     // comando rapido: risposta subito, anche con l'ingegnere spento
                     let ask = ASK.lock().unwrap().take();
                     if let Some(what) = ask {
-                        let text = engineer::answer(&tele, &what);
+                        let text = match what.as_str() {
+                            "ripeti" => eng.last_text(),
+                            "coach" => coach::LAST.lock().unwrap().clone().unwrap_or_else(|| "Nessun consiglio per ora: fai qualche giro pulito in prova".into()),
+                            _ => engineer::answer(&tele, &what),
+                        };
                         if !text.is_empty() {
                             eng.apply(&settings);
                             eng.say_now(&text);
@@ -638,6 +697,16 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                     // P6: momenti salienti (solo in gara); con la classifica ufficiale si mandano al sito (al massimo ogni 10 s)
                     if session == "Race" {
                         detector.update(s);
+                        pit_learn.update(s);
+                    }
+                    // V3 · «segna questo momento»
+                    if MARK.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                        if session == "Race" {
+                            detector.mark(s);
+                            say_text("Momento segnato");
+                        } else {
+                            say_text("I momenti si segnano in gara");
+                        }
                     }
                     if official && detector.dirty && moments_sent_at.map(|t| t.elapsed().as_secs() >= 10).unwrap_or(true) {
                         detector.dirty = false;

@@ -482,6 +482,11 @@ pub struct Drivers {
 }
 
 static DRIVERS: LazyLock<Mutex<Drivers>> = LazyLock::new(Default::default);
+
+/// Numero, classe, giro stimato della classe e se è del team, per l'auto `idx`
+pub fn car_brief(idx: usize) -> Option<(String, i32, f32, bool)> {
+    DRIVERS.lock().unwrap().list.iter().find(|d| d.idx == idx).map(|d| (d.number.clone(), d.class_id, d.class_lap, d.rare))
+}
 static TEAM: Mutex<Vec<i64>> = Mutex::new(Vec::new());
 
 /// Numeri cliente iRacing dei piloti Rare (dal sito): i compagni di squadra si colorano di viola

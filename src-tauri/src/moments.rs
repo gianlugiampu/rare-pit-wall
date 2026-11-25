@@ -127,6 +127,13 @@ impl Detector {
         self.dirty = true;
     }
 
+    /// V3 · «segna questo momento»: un momento della tua auto all'istante, per rivederlo e farne una clip
+    pub fn mark(&mut self, s: &mut Irsdk) {
+        let t = s.get("SessionTime").map(|v| v.as_f64()).unwrap_or(0.0);
+        let lap = s.get_at("CarIdxLapCompleted", self.my_idx).map(|v| v.as_i32()).unwrap_or(0) + 1;
+        self.add(format!("mark-{}", t as i64), "mark", self.my_idx, "momento segnato dal pilota".into(), lap, (t - 5.0).max(0.0));
+    }
+
     /// Da chiamare a ogni lettura (20 volte al secondo) durante una sessione di gara
     pub fn update(&mut self, s: &mut Irsdk) {
         let f = |s: &mut Irsdk, k: &str| s.get(k).map(|v| v.as_f64()).unwrap_or(0.0);

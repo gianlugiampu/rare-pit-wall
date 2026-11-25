@@ -18,6 +18,10 @@ pub const ACTIONS: &[(&str, &str)] = &[
     ("posizione", "Chiedi: posizione e giri"),
     ("tempi", "Chiedi: tempi"),
     ("delta", "Cambia il riferimento del delta"),
+    ("box", "Chiedi: dove rientro dopo il box"),
+    ("compagno", "Chiedi: distacco dal compagno"),
+    ("segna", "Segna questo momento (per le clip)"),
+    ("chiama", "Chiama il box (avviso sul pit wall)"),
     ("parla", "Tieni premuto e parla (comandi a voce)"),
 ];
 
@@ -105,6 +109,19 @@ pub fn run(app: &AppHandle, action: &str) {
     match action {
         "delta" => crate::overlay::cycle_delta(app),
         "parla" => crate::ascolto::start(),
+        "segna" => crate::MARK.store(true, std::sync::atomic::Ordering::Relaxed),
+        "chiama" => {
+            crate::live::call_box();
+            crate::say_text("Box avvisato");
+        }
+        "silenzio" => {
+            *crate::engineer::QUIET.lock().unwrap() = Some(Instant::now() + Duration::from_secs(300));
+            crate::say_text("Va bene, per 5 minuti ti dico solo le cose importanti");
+        }
+        "voce" => {
+            *crate::engineer::QUIET.lock().unwrap() = None;
+            crate::say_text("Torno a parlare");
+        }
         other => *crate::ASK.lock().unwrap() = Some(other.to_string()),
     }
 }

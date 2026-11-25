@@ -45,6 +45,28 @@ pub const FRASI: &[(&str, &str)] = &[
     ("come vado", "tempi"),
     ("cambia delta", "delta"),
     ("delta", "delta"),
+    // V2
+    ("compagno", "compagno"),
+    ("distacco dal compagno", "compagno"),
+    ("dove è il compagno", "compagno"),
+    ("temperatura", "meteo"),
+    ("temperatura pista", "meteo"),
+    ("meteo", "meteo"),
+    ("ripeti", "ripeti"),
+    ("dove rientro", "box"),
+    ("se mi fermo", "box"),
+    ("quanto metto al box", "benzina"),
+    // V3
+    ("segna", "segna"),
+    ("segna momento", "segna"),
+    ("segna questo momento", "segna"),
+    ("chiama il box", "chiama"),
+    ("avvisa il box", "chiama"),
+    ("dove perdo tempo", "coach"),
+    ("consiglio", "coach"),
+    ("silenzio", "silenzio"),
+    ("parla di meno", "silenzio"),
+    ("parla di più", "voce"),
 ];
 
 /// Stato mostrato nella scheda Voce

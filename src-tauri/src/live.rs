@@ -168,8 +168,18 @@ impl Tracker {
             "pitLap": pit_lap,
             "stopsLeft": stops_left,
             "tankL": self.tank_l,
+            // V3 · il pilota ha chiamato il box (ora, in secondi dal 1970)
+            "call": *CALL.lock().unwrap(),
             "onPitRoad": on_pit,
             "incidents": incidents,
         })
     }
+}
+
+/// V3 · «chiama il box»: ora della chiamata, la vede il team sulla pagina Live
+pub static CALL: std::sync::Mutex<Option<u64>> = std::sync::Mutex::new(None);
+
+pub fn call_box() {
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    *CALL.lock().unwrap() = Some(now);
 }

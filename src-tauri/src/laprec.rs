@@ -351,6 +351,7 @@ impl LapRec {
             },
         };
         if let Some(text) = crate::coach::advice(&lap, &reference, &who) {
+            *crate::coach::LAST.lock().unwrap() = Some(text.clone());
             *crate::coach::OUT.lock().unwrap() = Some(text);
         }
     }

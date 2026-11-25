@@ -50,6 +50,9 @@ pub fn mate_delta(pct: f32, lap_cur: f32) -> Option<(f32, f32, String)> {
     Some(((lap_cur as f64 - t) as f32, *lap.t.last()? as f32, name.clone()))
 }
 
+/// V3 · ultimo consiglio dato (per «dove perdo tempo?»)
+pub static LAST: Mutex<Option<String>> = Mutex::new(None);
+
 /// Consiglio pronto da dire (lo prende l'ingegnere)
 pub static OUT: Mutex<Option<String>> = Mutex::new(None);
 
