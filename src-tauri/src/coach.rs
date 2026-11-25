@@ -53,6 +53,9 @@ pub fn mate_delta(pct: f32, lap_cur: f32) -> Option<(f32, f32, String)> {
 /// V3 · ultimo consiglio dato (per «dove perdo tempo?»)
 pub static LAST: Mutex<Option<String>> = Mutex::new(None);
 
+/// F14 · tratto dello stile da migliorare del pilota (dal sito): "brake", "corner", "trail", "gas" o vuoto
+pub static STYLE: Mutex<String> = Mutex::new(String::new());
+
 /// Consiglio pronto da dire (lo prende l'ingegnere)
 pub static OUT: Mutex<Option<String>> = Mutex::new(None);
 
@@ -176,6 +179,23 @@ pub fn advice(a: &Lap, b: &Lap, who: &str) -> Option<String> {
         }
         if tips.is_empty() {
             continue; // perdita senza un motivo chiaro: meglio non dire niente
+        }
+        // F14 · il consiglio che corrisponde al tuo stile va per primo, detto in modo personale
+        let style = STYLE.lock().unwrap().clone();
+        let mine = |t: &String| match style.as_str() {
+            "brake" => t.contains("prima") && t.starts_with("freni"),
+            "corner" | "trail" => t.starts_with("velocità minima"),
+            "gas" => t.starts_with("gas pieno"),
+            _ => false,
+        };
+        if let Some(k) = tips.iter().position(|t| mine(t)) {
+            let t = tips.remove(k);
+            let lead = match style.as_str() {
+                "brake" => "come al solito ",
+                "corner" | "trail" => "come al solito, ",
+                _ => "come al solito, ",
+            };
+            tips.insert(0, format!("{lead}{t}"));
         }
         tips.truncate(2);
         let vs = if who.is_empty() { String::new() } else { format!(" rispetto a {who}") };
@@ -516,6 +536,9 @@ mod tests {
         assert!(a.contains("freni 50 metri prima"), "{a}");
         assert!(advice(&rif, &rif, "").is_none());
         assert!(advice(&mio, &rif, "Luca").unwrap().contains("rispetto a Luca"));
+        *STYLE.lock().unwrap() = "brake".into();
+        assert!(advice(&mio, &rif, "").unwrap().contains("come al solito freni 50 metri prima"));
+        *STYLE.lock().unwrap() = String::new();
     }
 }
 

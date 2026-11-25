@@ -266,6 +266,14 @@ fn fetch_reference(app: &AppHandle, key: String) {
             *coach::MATE.lock().unwrap() = Some((key, name, lap));
         }
     });
+    // F14: tratto dello stile di guida da migliorare (per il Coach a voce)
+    if let Some(token) = load_config(app).token {
+        tauri::async_runtime::spawn(async move {
+            let Ok(r) = http().get(format!("{SITE}/api/pitwall/style")).bearer_auth(token).timeout(Duration::from_secs(60)).send().await else { return };
+            let Ok(v) = r.json::<serde_json::Value>().await else { return };
+            *coach::STYLE.lock().unwrap() = v["weak"].as_str().unwrap_or("").to_string();
+        });
+    }
     // F7: classifica del team con questa pista e auto
     let Some(token) = load_config(app).token else { return };
     let key2 = format!("{track_b}-{car_b}");
