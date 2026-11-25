@@ -103,11 +103,13 @@ pub struct Settings {
     pub cars: BTreeMap<String, BTreeMap<String, bool>>,
     /// F39 · regia automatica: da spettatore o nel replay, l'inquadratura va sulla battaglia più vicina
     pub director: bool,
+    /// F21 · modalità notte degli overlay: "auto" (quando in iRacing è notte), "sempre", "mai"
+    pub night: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { enabled: false, show: "pista".into(), items: BTreeMap::new(), layouts: BTreeMap::new(), stream: false, light: false, per_car: true, cars: BTreeMap::new(), director: false }
+        Settings { enabled: false, show: "pista".into(), items: BTreeMap::new(), layouts: BTreeMap::new(), stream: false, light: false, per_car: true, cars: BTreeMap::new(), director: false, night: "auto".into() }
     }
 }
 
@@ -386,7 +388,7 @@ fn is_overlay_target(t: &EventTarget) -> bool {
 }
 
 fn config_payload(s: &Settings, edit: bool) -> serde_json::Value {
-    serde_json::json!({ "edit": edit, "light": s.light, "items": items().into_iter().map(|id| (id, s.item(id))).collect::<BTreeMap<_, _>>() })
+    serde_json::json!({ "edit": edit, "light": s.light, "night": s.night, "items": items().into_iter().map(|id| (id, s.item(id))).collect::<BTreeMap<_, _>>() })
 }
 
 /// Salva le posizioni degli overlay aperti per la combinazione di monitor attuale
@@ -482,6 +484,8 @@ struct Fast {
     delta_best: Option<f32>,
     delta_session: Option<f32>,
     delta_last: Option<f32>,
+    /// F21 · in iRacing è notte (sole sotto l'orizzonte)
+    night: bool,
     /// Coach in overlay: curve, prossima frenata, totale sul riferimento
     coach: Option<crate::coach::View>,
     /// P11: delta sul giro del compagno più veloce (stessa pista e auto), il suo tempo e il nome
@@ -742,6 +746,7 @@ fn start_reader(app: AppHandle) {
                     fast.delta_session = ok(s, "LapDeltaToSessionBestLap_OK").then(|| f(s, "LapDeltaToSessionBestLap"));
                     fast.delta_last = ok(s, "LapDeltaToSessionLastlLap_OK").then(|| f(s, "LapDeltaToSessionLastlLap"));
                     fast.yaw = f(s, "Yaw");
+                    fast.night = s.get("SolarAltitude").map(|v| v.as_f64() < -0.05).unwrap_or(false);
                     // Coach in overlay e bip di frenata (in tutte le sessioni: overlay e bip si scelgono)
                     if let Some(plan) = crate::coach::current_plan() {
                         let sess = match STATE_SESSION.lock().unwrap().as_str() {
@@ -1105,7 +1110,7 @@ pub fn overlay_state(app: AppHandle) -> OverlayState {
 
 /// Impostazioni cambiate dalla finestra delle impostazioni (async: aprire finestre da un comando sincrono blocca Windows)
 #[tauri::command]
-pub async fn overlay_save(app: AppHandle, enabled: bool, show: String, items: BTreeMap<String, Item>, stream: Option<bool>, light: Option<bool>, per_car: Option<bool>, director: Option<bool>) {
+pub async fn overlay_save(app: AppHandle, enabled: bool, show: String, items: BTreeMap<String, Item>, stream: Option<bool>, light: Option<bool>, per_car: Option<bool>, director: Option<bool>, night: Option<String>) {
     let s = {
         let mut st = STATE.lock().unwrap();
         st.settings.enabled = enabled;
@@ -1122,6 +1127,9 @@ pub async fn overlay_save(app: AppHandle, enabled: bool, show: String, items: BT
         }
         if let Some(v) = director {
             st.settings.director = v;
+        }
+        if let Some(v) = night {
+            st.settings.night = v;
         }
         // F10: gli overlay accesi si ricordano per l'auto in uso
         let car = CUR_CAR.lock().unwrap().clone();
@@ -1181,6 +1189,20 @@ fn bump_map() {
 
 /// Disegni ufficiali di iRacing: si scaricano la prima volta e poi si controlla (con l'ETag) se sono cambiati.
 /// Se la pista non si trova, resta la riserva: il disegno dal primo giro pulito.
+/// F41 · disegni delle piste del calendario scaricati in anticipo: (TrackID, nome interno, configurazione)
+pub fn prefetch_maps(list: Vec<(String, String, String)>) {
+    let Some(dir) = MAP_DIR.lock().unwrap().clone() else { return };
+    for (id, name, config) in list {
+        let key = format!("{id}-{config}");
+        if crate::trackmap::load(&dir, &key).and_then(|m| m.svg).is_some() {
+            continue; // già scaricato
+        }
+        if let Some(base) = crate::trackmap::iracing_base(&id, &name) {
+            fetch_iracing_map(dir.clone(), key, base);
+        }
+    }
+}
+
 fn fetch_iracing_map(dir: std::path::PathBuf, key: String, base: String) {
     tauri::async_runtime::spawn(async move {
         let saved = crate::trackmap::load(&dir, &key).and_then(|m| m.svg).filter(|s| s.base == base);

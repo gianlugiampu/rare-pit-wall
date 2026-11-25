@@ -13,6 +13,7 @@ type Fast = {
   deltaBest: number | null; deltaSession: number | null; deltaLast: number | null; carLr: number; yaw: number;
   deltaMate?: number | null; mateLap?: number | null; mateName?: string | null;
   coach?: CoachView | null;
+  night?: boolean;
 };
 type Slow = {
   session: string; lap: number; lapsRemain: number | null; timeRemain: number | null;
@@ -843,6 +844,9 @@ function onFrame(fr: Frame) {
   }
   if (fr.cars) lastCars = fr.cars;
   lastFast = fr.fast;
+  // F21 · modalità notte: overlay più scuri quando in iRacing è notte (o sempre, se scelto)
+  const nightMode = String((cfg as Config & { night?: string }).night ?? "auto");
+  document.body.classList.toggle("night", nightMode === "sempre" || (nightMode === "auto" && !!fr.fast.night));
   view?.update(fr.fast, fr.slow ?? null, fr.cars ?? null);
 }
 

@@ -84,6 +84,10 @@ pub const FRASI: &[(&str, &str)] = &[
     ("come finisco", "previsione"),
     ("previsione", "previsione"),
     ("dove arrivo", "previsione"),
+    ("quanto posso rallentare", "margine"),
+    ("margine", "margine"),
+    ("quanto perdo al box", "sosta"),
+    ("quanto dura la sosta", "sosta"),
 ];
 
 /// Stato mostrato nella scheda Voce

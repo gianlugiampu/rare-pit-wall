@@ -111,6 +111,9 @@ pub struct Tele {
     pub tyre_gap: Option<(f32, bool)>,
     /// F19: la tua auto è fuori pista adesso (quattro ruote fuori)
     pub off_track: bool,
+    /// Aiuto ai box: limite di velocità in corsia (km/h) e limitatore acceso
+    pub pit_limit_kmh: Option<f32>,
+    pub limiter_on: bool,
 }
 
 /// P13 · rientro dopo una sosta fatta adesso
@@ -241,6 +244,12 @@ pub struct Engineer {
     // F19 · uscite di pista della sessione
     offs: u32,
     was_off: bool,
+    // F29 · ultimo giro in cui si è detto il margine
+    manage_lap: i32,
+    // aiuto ai box: avviso limitatore già detto in questa entrata, uscita dai box (quando)
+    limiter_said: bool,
+    pit_exit_at: Option<Instant>,
+    in_pit_lane: bool,
 }
 
 impl Engineer {
@@ -459,6 +468,13 @@ impl Engineer {
             self.wet_tip_lap = self.laps_done;
             self.push("Pista molto bagnata: valuta le gomme da pioggia".into(), true);
         }
+        // F29 · ritmo da gestione: buon vantaggio su chi segue e nessuno da prendere davanti (al massimo ogni 5 giri)
+        if self.laps_done - self.manage_lap >= 5 {
+            if let Some(text) = manage_text(t, closing(&self.hist_behind)).filter(|_| t.gap_ahead.map_or(true, |g| g > 4.0)) {
+                self.manage_lap = self.laps_done;
+                self.push(text, false);
+            }
+        }
         // D7 · risparmio benzina: ogni 5 giri, quando basta risparmiare per evitare la sosta
         if self.laps_done - self.save_said_lap >= 5 {
             if let Some(text) = Engineer::save_text(t).filter(|x| x.starts_with("Per non fermarti")) {
@@ -562,6 +578,10 @@ impl Engineer {
             dq_said: false,
             offs: 0,
             was_off: false,
+            manage_lap: -99,
+            limiter_said: false,
+            pit_exit_at: None,
+            in_pit_lane: false,
         }
     }
 
@@ -678,6 +698,32 @@ impl Engineer {
             }
         }
 
+        // ——— Aiuto ai box: limitatore all'entrata e all'uscita della corsia ———
+        if t.on_track {
+            if t.on_pit_road {
+                if !self.in_pit_lane {
+                    self.in_pit_lane = true;
+                    self.limiter_said = false;
+                }
+                if let Some(lim) = t.pit_limit_kmh {
+                    if !t.limiter_on && t.speed_kmh > lim + 3.0 && !self.limiter_said {
+                        self.limiter_said = true;
+                        self.push_urgent("Limitatore!".into());
+                    }
+                }
+            } else if self.in_pit_lane {
+                self.in_pit_lane = false;
+                self.pit_exit_at = Some(Instant::now());
+            }
+            if let Some(at) = self.pit_exit_at {
+                if at.elapsed() > Duration::from_secs(3) {
+                    self.pit_exit_at = None;
+                    if t.limiter_on {
+                        self.push_urgent("Togli il limitatore".into());
+                    }
+                }
+            }
+        }
         // ——— F30 · penalità: si ricorda a ogni giro finché non è scontata ———
         if (race || quali) && s.flags {
             let black = t.flags & BLACK != 0;
@@ -1110,6 +1156,30 @@ fn strategia_window(lap: i32, remain: f32, fuel: f32, per: f32, tank: f32) -> Op
     crate::strategia::pit_window(lap, remain, fuel, per, tank)
 }
 
+// ——— F29 · ritmo da gestione ———
+
+/// «Hai 8 decimi a giro di margine su chi ti segue»: quanto puoi rallentare e restare davanti fino alla fine
+pub fn manage_text(t: &Tele, rate_behind: Option<f32>) -> Option<String> {
+    let rem = t.laps_remain.filter(|r| *r >= 2)? as f32;
+    let gap = t.gap_behind?;
+    let margin = (gap - 1.0) / rem - rate_behind.unwrap_or(0.0).max(0.0);
+    (margin >= 0.5).then(|| format!("Hai {} a giro di margine su chi ti segue: puoi gestire gomme e benzina", say_gap(margin)))
+}
+
+/// F31 · sosta prevista: corsia box (imparata o stimata) più il tempo per la benzina (circa 2,5 litri al secondo)
+pub fn stop_text(t: &Tele) -> Option<String> {
+    let r = t.rejoin.as_ref()?;
+    let fuel = pit_fuel(t, 0.5).unwrap_or(0.0);
+    let fuel_s = fuel / 2.5;
+    let lane = if r.learned { (r.loss - fuel_s).max(15.0) } else { 20.0 };
+    let total = (lane + fuel_s).round();
+    Some(if fuel >= 1.0 {
+        format!("Sosta prevista circa {} secondi: {} di corsia e {} per {} litri", total as i32, lane.round() as i32, fuel_s.round() as i32, fuel as i32)
+    } else {
+        format!("Sosta prevista circa {} secondi, senza benzina", total as i32)
+    })
+}
+
 // ——— F32 · box automatico ———
 
 /// Litri da mettere per arrivare in fondo con `margin` giri in più (None se il consumo non si conosce ancora)
@@ -1253,6 +1323,14 @@ mod tests {
         let t = Tele { ahead_num: "7".into(), behind_num: "12".into(), ahead_pace: Some((106.2, None)), behind_pace: Some((105.8, Some(0.2))), my_stops: Some(0), ahead_stops: Some(1), behind_stops: Some(0), ..Default::default() };
         assert_eq!(answer(&t, "passo"), "Davanti il 7 gira in 1 minuto 46 e 2, dietro il 12 in 1 minuto 45 e 8");
         assert_eq!(answer(&t, "soste"), "Hai fatto 0 soste, il 7 davanti 1, il 12 dietro 0");
+    }
+    #[test]
+    fn margine_e_sosta() {
+        let t = Tele { laps_remain: Some(5), gap_behind: Some(6.0), ..Default::default() };
+        assert_eq!(manage_text(&t, Some(0.1)).unwrap(), "Hai 9 decimi a giro di margine su chi ti segue: puoi gestire gomme e benzina");
+        assert!(manage_text(&t, Some(0.8)).is_none());
+        let t = Tele { fuel_per_lap: Some(2.5), laps_remain: Some(10), fuel_l: 8.0, tank_l: Some(45.0), rejoin: Some(Rejoin { pos: 5, ahead: None, behind: None, loss: 25.0, learned: false }), ..Default::default() };
+        assert_eq!(stop_text(&t).unwrap(), "Sosta prevista circa 28 secondi: 20 di corsia e 8 per 19 litri");
     }
     #[test]
     fn box_automatico() {

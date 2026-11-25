@@ -103,6 +103,8 @@ pub struct LapRec {
     track_id: Option<i64>,
     track_name: String,
     track_config: String,
+    /// F41: nome interno iRacing della pista (per scaricare il disegno)
+    track_internal: String,
     started_at: String,
     cars: BTreeMap<usize, CarRec>,
     me: usize,
@@ -163,6 +165,7 @@ impl LapRec {
             track_id: irsdk::yaml_value(yaml, "TrackID", None).and_then(|v| v.parse().ok()),
             track_name: irsdk::yaml_value(yaml, "TrackDisplayName", None).unwrap_or_default(),
             track_config: irsdk::yaml_value(yaml, "TrackConfigName", None).unwrap_or_default(),
+            track_internal: irsdk::yaml_value(yaml, "TrackName", None).unwrap_or_default(),
             started_at,
             me,
             ..Default::default()
@@ -392,6 +395,7 @@ impl LapRec {
             "iracingTrackId": self.track_id,
             "trackName": self.track_name,
             "trackConfig": self.track_config,
+            "trackInternal": self.track_internal,
             "startedAt": self.started_at,
             "cars": self.cars.values().filter(|c| !c.laps.is_empty()).collect::<Vec<_>>(),
             // telemetria del tuo giro pulito più veloce (per la pagina Telemetria)

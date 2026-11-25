@@ -148,6 +148,11 @@ fn fetch_team(app: &AppHandle, shared: Arc<Shared>) {
                 overlay::set_team(ids.clone());
                 *shared.team_ids.lock().unwrap() = ids;
             }
+            // F41: disegni delle piste del calendario, scaricati in anticipo
+            let maps: Vec<(String, String, String)> = v["maps"].as_array().cloned().unwrap_or_default().iter().filter_map(|m| Some((m["id"].as_i64()?.to_string(), m["name"].as_str()?.to_string(), m["config"].as_str().unwrap_or("").to_string()))).collect();
+            if !maps.is_empty() {
+                overlay::prefetch_maps(maps);
+            }
         }
     });
 }
@@ -700,6 +705,9 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                             })
                             .flatten(),
                         off_track: s.get("PlayerTrackSurface").map(|v| v.as_i32()).unwrap_or(-1) == 0,
+                        // «TrackPitSpeedLimit: 80.00 kph»; EngineWarnings 0x10 = limitatore acceso
+                        pit_limit_kmh: irsdk::yaml_value(&cur_yaml, "TrackPitSpeedLimit", None).and_then(|v| v.split_whitespace().next().and_then(|n| n.parse::<f32>().ok())),
+                        limiter_on: s.get("EngineWarnings").map(|v| v.as_i32() & 0x10 != 0).unwrap_or(false),
                         tyre_gap: (session == "Race" && me >= 0)
                             .then(|| {
                                 // F13: confronto tra chi ha gomme diverse dalle tue (ultimo giro buono)
@@ -749,6 +757,9 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                     if let Some(what) = ask {
                         let text = match what.as_str() {
                             "ripeti" => eng.last_text(),
+                            // F29 · margine su chi segue; F31 · sosta prevista
+                            "margine" => engineer::manage_text(&tele, None).unwrap_or_else(|| "Non hai margine per rallentare".into()),
+                            "sosta" => engineer::stop_text(&tele).unwrap_or_else(|| "La sosta la calcolo in gara".into()),
                             // F12 · previsione dell'arrivo
                             "previsione" => engineer::forecast_text(&tele).unwrap_or_else(|| "La previsione la faccio in gara, dopo qualche giro".into()),
                             // F17 · gomme

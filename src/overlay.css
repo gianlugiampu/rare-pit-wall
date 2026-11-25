@@ -244,3 +244,7 @@ body.light *, body.light *::before, body.light *::after { animation: none !impor
 .lossg path.gain { stroke: var(--lap-pb); }
 .lossg path.lose { stroke: var(--lap-invalid); }
 
+/* F21 · modalità notte: meno luce negli overlay */
+body.night #zoom { filter: brightness(.68) saturate(.85); }
+body.night .panel { background: rgb(4 2 6 / var(--bg-a)); }
+
