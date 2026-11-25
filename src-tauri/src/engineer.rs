@@ -295,6 +295,11 @@ impl Engineer {
         self.queue.push_front(Msg { text, important: true, urgent: true, at: Instant::now() });
     }
 
+    /// F1 · frase sulla battaglia (curve dove sei più forte tu o lui): si dice appena c'è un po' di respiro
+    pub fn battle_tip(&mut self, text: String) {
+        self.push(text, true);
+    }
+
     /// V2: ultima frase detta (per «ripeti»)
     pub fn last_text(&self) -> String {
         if self.out.last.is_empty() {
@@ -754,6 +759,11 @@ impl Engineer {
         }
         let urgent = self.queue.front().is_some_and(|m| m.urgent && m.at.elapsed() < Duration::from_secs(8));
         self.queue.retain(|m| !m.urgent || m.at.elapsed() < Duration::from_secs(8));
+        // F2 · silenzio in battaglia: con un'auto a meno di un secondo, in gara, solo pericoli, avvisi importanti e messaggi del box
+        let battle = t.session == "Race" && (t.gap_ahead.is_some_and(|g| g < 1.0) || t.gap_behind.is_some_and(|g| g < 1.0));
+        if battle && !urgent && self.out.radio.is_empty() && !self.queue.front().is_some_and(|m| m.important) {
+            return;
+        }
         if self.last_end.elapsed() < Duration::from_millis(if urgent { 300 } else { 3000 }) {
             return;
         }

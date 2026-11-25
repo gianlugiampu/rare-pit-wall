@@ -291,6 +291,8 @@ pub struct Live {
     braked: Vec<bool>,
     brake_diff: Vec<Option<f32>>,
     stage: Vec<u8>,
+    /// F6: velocità minima nella curva (giro in corso)
+    zmin: Vec<f32>,
 }
 
 /// Dati per gli overlay del Coach
@@ -318,10 +320,10 @@ pub struct NextBrake {
 
 impl Live {
     /// `session`: 0 prova, 1 qualifica, 2 gara
-    pub fn step(&mut self, plan: &Plan, pct: f32, lap_cur: f32, brake: f32, on_track: bool, session: usize) -> View {
+    pub fn step(&mut self, plan: &Plan, pct: f32, lap_cur: f32, brake: f32, speed_kmh: f32, on_track: bool, session: usize) -> View {
         let z = plan.zones.len();
         if self.rev != plan.rev || self.loss.len() != z {
-            *self = Live { rev: plan.rev, last_pct: pct as f64, entry: vec![None; z], loss: vec![None; z], braked: vec![false; z], brake_diff: vec![None; z], stage: vec![0; z] };
+            *self = Live { rev: plan.rev, last_pct: pct as f64, entry: vec![None; z], loss: vec![None; z], braked: vec![false; z], brake_diff: vec![None; z], stage: vec![0; z], zmin: vec![f32::MAX; z] };
         }
         let pct = pct as f64;
         // nuovo giro: si riparte (i metri di frenata del giro scorso restano)
@@ -330,6 +332,7 @@ impl Live {
             self.loss = vec![None; z];
             self.braked = vec![false; z];
             self.stage = vec![0; z];
+            self.zmin = vec![f32::MAX; z];
         }
         let lt = lap_cur as f64;
         let len = plan.len_m;
@@ -345,9 +348,14 @@ impl Live {
                 if let Some(t0) = self.entry[i] {
                     self.loss[i] = Some(((lt - t0) - (zp.t_e - zp.t_s)) as f32);
                 }
+                // F6 · allenamento di frenata su questa curva: frase all'uscita
+                if on_track && crate::allenamento::TRAIN.load(std::sync::atomic::Ordering::Relaxed) == i + 1 && self.zmin[i] < f32::MAX {
+                    crate::say_text(&train_line(i + 1, self.brake_diff[i].filter(|_| self.braked[i]), self.zmin[i] - zp.min_spd as f32));
+                }
             }
             if pct >= zp.s && pct < zp.e {
                 cur = i as i32;
+                self.zmin[i] = self.zmin[i].min(speed_kmh);
             }
             let Some(bp) = zp.brake else { continue };
             // il tuo punto di frenata rispetto al riferimento (+ = dopo)
@@ -383,6 +391,17 @@ impl Live {
             next,
         }
     }
+}
+
+/// F6 · «Curva 3: frenata 4 metri dopo, minima 2 chilometri orari più alta»
+pub fn train_line(n: usize, brake_m: Option<f32>, dmin: f32) -> String {
+    let b = match brake_m {
+        Some(m) if m.abs() < 3.0 => "frenata giusta".to_string(),
+        Some(m) => format!("frenata {} metri {}", m.abs().round() as i32, if m > 0.0 { "dopo" } else { "prima" }),
+        None => "frenata non vista".to_string(),
+    };
+    let v = if dmin.abs() < 2.0 { "minima uguale".to_string() } else { format!("minima {} chilometri orari più {}", dmin.abs().round() as i32, if dmin > 0.0 { "alta" } else { "bassa" }) };
+    format!("Curva {n}: {b}, {v}")
 }
 
 static BEEPER: Mutex<Option<std::sync::mpsc::Sender<(u8, f32)>>> = Mutex::new(None);
@@ -483,10 +502,11 @@ mod tests_plan {
         *BEEP.lock().unwrap() = (false, [true, true, true], 0.0);
         let mut live = Live::default();
         let bp = z.brake.unwrap() as f32;
-        let v = live.step(&plan, bp - 0.005, 10.0, 0.0, true, 0);
+        let v = live.step(&plan, bp - 0.005, 10.0, 0.0, 200.0, true, 0);
         let nx = v.next.unwrap();
         assert!(!nx.now && nx.dist_m > 20.0 && nx.dist_m < 30.0, "{}", nx.dist_m);
-        let v = live.step(&plan, bp + 0.001, 10.5, 0.5, true, 0);
+        let v = live.step(&plan, bp + 0.001, 10.5, 0.5, 150.0, true, 0);
+        assert_eq!(train_line(3, Some(4.4), 2.4), "Curva 3: frenata 4 metri dopo, minima 2 chilometri orari più alta");
         assert!(v.next.unwrap().now);
     }
 }

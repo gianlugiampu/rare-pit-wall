@@ -168,6 +168,7 @@ impl LapRec {
         r.update_info(yaml, team_ids);
         // nuova sessione: il tuo migliore si ricomincia a cercare
         *crate::coach::REF_MINE.lock().unwrap() = None;
+        crate::allenamento::new_session();
         r
     }
 
@@ -306,6 +307,10 @@ impl LapRec {
                         self.changed = true;
                         if me {
                             self.my_extra = None;
+                            // F5/F7: obiettivo della sessione e classifica del team
+                            for text in crate::allenamento::on_lap(clean, last as f32) {
+                                crate::say_text(&text);
+                            }
                             let samples = self.my_lap_samples.take();
                             let data = if clean { samples.as_deref().and_then(|sm| reduce(sm, last)) } else { None };
                             // P12: consiglio del coach (prima di aggiornare il migliore)

@@ -131,4 +131,10 @@ body:has(#main:not([hidden])) { display: flex; flex-direction: column; overflow:
 .pc-list li em { font-style: normal; color: var(--ink400); margin-left: auto; text-align: right; }
 .ov-general .row { display: flex; align-items: center; gap: 8px; margin-top: 8px; font-size: 13px; }
 .ov-general .row input { accent-color: var(--main); width: 16px; height: 16px; margin: 0; }
+/* Allenamento: obiettivo, frenata, classifica del team */
+.num-in { width: 90px; flex: none !important; background: var(--dark); color: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 5px 8px; font: inherit; }
+.bd-list { margin: 6px 0 0; padding-left: 22px; font-size: 13px; }
+.bd-list li { padding: 3px 0; border-top: 1px solid var(--line); }
+.bd-list li span { float: right; color: #fff; font-weight: 700; font-variant-numeric: tabular-nums; }
+.bd-list li.rec span { color: var(--p300); }
 

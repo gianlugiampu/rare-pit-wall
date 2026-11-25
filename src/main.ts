@@ -318,6 +318,50 @@ window.addEventListener("DOMContentLoaded", async () => {
       $("bk-msg").textContent = String(e);
     }
   });
+  // Allenamento: obiettivo della sessione, curva per la frenata, classifica del team
+  type GoalState = { goal: { kind: string; laps: number; value: number }; done: number; reached: boolean; train: number; board: [string, number][]; myBest: number | null };
+  const fmtLap = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(3).padStart(6, "0")}`;
+  const parseLap = (t: string) => {
+    const m = t.trim().replace(",", ".").match(/^(?:(\d+):)?(\d+(?:\.\d+)?)$/);
+    return m ? Number(m[1] ?? 0) * 60 + Number(m[2]) : NaN;
+  };
+  const glKind = $<HTMLSelectElement>("gl-kind");
+  const setLabel = () => ($("gl-vlabel").textContent = glKind.value === "costanza" ? "Tolleranza ± s (es. 0.3)" : "Tempo (es. 1:46.0)");
+  glKind.addEventListener("change", setLabel);
+  const tr = $<HTMLSelectElement>("tr-corner");
+  tr.add(new Option("Nessuna curva", "0"));
+  for (let i = 1; i <= 25; i++) tr.add(new Option(`Curva ${i}`, String(i)));
+  tr.addEventListener("change", () => invoke("train_set", { corner: Number(tr.value) }));
+  $("gl-set").addEventListener("click", async () => {
+    const kind = glKind.value;
+    const raw = $<HTMLInputElement>("gl-value").value;
+    const value = kind === "costanza" ? Number(raw.replace(",", ".")) : parseLap(raw);
+    if (kind && !(value > 0)) {
+      $("gl-state").textContent = kind === "costanza" ? "Scrivi la tolleranza, es. 0.3" : "Scrivi il tempo, es. 1:46.0";
+      return;
+    }
+    await invoke("goal_set", { goal: { kind, laps: Number($<HTMLInputElement>("gl-laps").value) || 10, value: kind ? value : 0 } });
+    showGoal();
+  });
+  let first = true;
+  const showGoal = async () => {
+    const g = await invoke<GoalState>("goal_state");
+    if (first) {
+      first = false;
+      glKind.value = g.goal.kind;
+      if (g.goal.laps) $<HTMLInputElement>("gl-laps").value = String(g.goal.laps);
+      if (g.goal.value) $<HTMLInputElement>("gl-value").value = g.goal.kind === "costanza" ? String(g.goal.value) : fmtLap(g.goal.value);
+      tr.value = String(g.train);
+      setLabel();
+    }
+    $("gl-state").textContent = !g.goal.kind ? "" : g.reached ? `✓ Obiettivo raggiunto (${g.goal.laps} giri)` : `Fatti ${g.done} su ${g.goal.laps}`;
+    $("bd-list").innerHTML = g.board.length
+      ? g.board.map(([n, t], i) => `<li class="${i === 0 ? "rec" : ""}">${n.replace(/</g, "&lt;")}<span>${fmtLap(t)}</span></li>`).join("")
+      : `<li>Nessun tempo del team con questa pista e auto (o non sei ancora in sessione).</li>`;
+    $("bd-me").textContent = g.myBest ? `Il tuo migliore in questa sessione: ${fmtLap(g.myBest)}` : "";
+  };
+  showGoal();
+  setInterval(showGoal, 2000);
   // F42 · controllo prima della gara
   $("pc-go").addEventListener("click", async () => {
     const list = $("pc-list");

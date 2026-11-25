@@ -79,6 +79,33 @@
           </div>
           <p id="result" class="msg ok" hidden></p>
           <div class="box">
+            <p class="k">Allenamento</p>
+            <div class="cols2">
+              <div>
+                <label class="field">Obiettivo
+                  <select id="gl-kind">
+                    <option value="">Nessuno</option>
+                    <option value="sotto">Giri puliti sotto un tempo</option>
+                    <option value="costanza">Giri di fila costanti</option>
+                  </select>
+                </label>
+                <label class="field">Giri <input id="gl-laps" type="number" min="1" max="50" value="10" class="num-in" /></label>
+                <label class="field"><span id="gl-vlabel">Tempo (es. 1:46.0)</span> <input id="gl-value" type="text" value="" class="num-in" /></label>
+                <button type="button" id="gl-set" class="ghost">Imposta</button>
+                <p id="gl-state" class="small"></p>
+                <label class="field">Allenamento di frenata
+                  <select id="tr-corner"></select>
+                </label>
+                <p class="small">A ogni passaggio Serena ti dice frenata e velocità minima in quella curva rispetto al riferimento del Coach.</p>
+              </div>
+              <div>
+                <p class="small"><b class="w">Classifica del team</b> con questa pista e auto (giro pulito migliore di ognuno)</p>
+                <ol id="bd-list" class="bd-list"></ol>
+                <p id="bd-me" class="small"></p>
+              </div>
+            </div>
+          </div>
+          <div class="box">
             <p class="k">Controllo prima della gara</p>
             <p class="small">Un clic per vedere se è tutto pronto: sito, iRacing, overlay, voce, microfono, volante.</p>
             <button type="button" id="pc-go" class="ghost">Controlla</button>

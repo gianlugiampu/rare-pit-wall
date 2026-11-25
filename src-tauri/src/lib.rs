@@ -2,6 +2,7 @@
 //! P1 (base): legge iRacing, mostra lo stato nella finestrella e nell'icona vicino all'orologio,
 //! si abbina all'account del pilota con un codice preso dal Profilo dell'area piloti.
 
+mod allenamento;
 mod ascolto;
 mod clips;
 pub mod coach;
@@ -252,6 +253,7 @@ fn send_session(app: &AppHandle, body: serde_json::Value) {
 fn fetch_reference(app: &AppHandle, key: String) {
     let Some(token) = load_config(app).token else { return };
     let Some((track, car)) = key.split_once('-').map(|(a, b)| (a.to_string(), b.to_string())) else { return };
+    let (track_b, car_b) = (track.clone(), car.clone());
     tauri::async_runtime::spawn(async move {
         let url = format!("{SITE}/api/pitwall/reference?track={track}&car={car}");
         let Ok(r) = http().get(url).bearer_auth(token).timeout(Duration::from_secs(30)).send().await else { return };
@@ -263,6 +265,17 @@ fn fetch_reference(app: &AppHandle, key: String) {
             let name = v["name"].as_str().unwrap_or("il compagno").split_whitespace().next().unwrap_or("il compagno").to_string();
             *coach::MATE.lock().unwrap() = Some((key, name, lap));
         }
+    });
+    // F7: classifica del team con questa pista e auto
+    let Some(token) = load_config(app).token else { return };
+    let key2 = format!("{track_b}-{car_b}");
+    let (track, car) = (track_b, car_b);
+    tauri::async_runtime::spawn(async move {
+        let url = format!("{SITE}/api/pitwall/board?track={track}&car={car}");
+        let Ok(r) = http().get(url).bearer_auth(token).timeout(Duration::from_secs(30)).send().await else { return };
+        let Ok(v) = r.json::<serde_json::Value>().await else { return };
+        let board: Vec<(String, f32)> = v["board"].as_array().map(|a| a.iter().filter_map(|x| Some((x["name"].as_str()?.to_string(), x["ms"].as_f64()? as f32 / 1000.0))).collect()).unwrap_or_default();
+        allenamento::set_board(key2, board);
     });
 }
 
@@ -329,6 +342,8 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
         let mut track_len_m: f32 = 0.0;
         // P13: tempo perso con una sosta, imparato dalle soste delle altre auto
         let mut pit_learn = strategia::PitLearn::default();
+        // F1: battaglia con la stessa auto
+        let mut battle = strategia::Battle::default();
         let mut pct_hist: std::collections::VecDeque<Vec<f32>> = Default::default();
         let (mut subsession, mut session_num, mut official) = (String::new(), 0, false);
         let mut sent: std::collections::HashSet<String> = Default::default();
@@ -666,6 +681,18 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                             eng.say_now(&text);
                         }
                     }
+                    // F1 · contagiri delle battaglie (in gara, con un'auto entro un secondo davanti o dietro)
+                    if session == "Race" {
+                        let rival = if tele.gap_ahead.is_some_and(|g| g < 1.0) { tele.ahead_idx } else if tele.gap_behind.is_some_and(|g| g < 1.0) { tele.behind_idx } else { -1 };
+                        let zones: Vec<(f64, f64)> = coach::current_plan().map(|p| p.zones.iter().map(|z| (z.s, z.e)).collect()).unwrap_or_default();
+                        let pct = |s: &mut irsdk::Irsdk, i: i32| if i >= 0 { s.get_at("CarIdxLapDistPct", i as usize).map(|v| v.as_f64()).unwrap_or(-1.0) } else { -1.0 };
+                        let (mp, rp) = (pct(s, me), pct(s, rival));
+                        let num = if rival >= 0 { overlay::car_brief(rival as usize).map(|c| c.0).unwrap_or_default() } else { String::new() };
+                        let st_t = s.get("SessionTime").map(|v| v.as_f64()).unwrap_or(0.0);
+                        if let Some(text) = battle.update(if rp >= 0.0 { rival } else { -1 }, &num, mp, rp, st_t, &zones, tele.lap_completed) {
+                            eng.battle_tip(text);
+                        }
+                    }
                     // P13: dati per l'overlay «Stratega», una volta al secondo
                     if tick % 20 == 0 {
                         overlay::push_stratega(&app, eng.view(&tele));
@@ -970,6 +997,22 @@ fn set_engineer(app: AppHandle, shared: tauri::State<Arc<Shared>>, settings: eng
     }
 }
 
+// ——— Idee per l'allenamento: obiettivo, curva per la frenata, classifica del team ———
+#[tauri::command]
+fn goal_state() -> allenamento::GoalState {
+    allenamento::state()
+}
+
+#[tauri::command]
+fn goal_set(goal: allenamento::Goal) {
+    allenamento::set_goal(goal);
+}
+
+#[tauri::command]
+fn train_set(corner: usize) {
+    allenamento::TRAIN.store(corner, std::sync::atomic::Ordering::Relaxed);
+}
+
 // ——— F10 · avvio con Windows ———
 #[tauri::command]
 fn get_autostart(app: AppHandle) -> bool {
@@ -1185,7 +1228,7 @@ pub fn run() {
         .manage(shared.clone())
         .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto, get_moments, jump_to_moment, export_clips, clip_status, cancel_clips, open_videos, clip_files, send_clip,
             overlay::overlay_state, overlay::overlay_save, overlay::overlay_edit, overlay::overlay_reset, overlay::overlay_open_settings, overlay::overlay_hello, overlay::overlay_drivers, overlay::overlay_map, overlay::overlay_map_dir, overlay::overlay_coach_ref,
-            listen_state, listen_install, listen_set_mic, get_autostart, set_autostart, settings_backup, settings_restore,
+            listen_state, listen_install, listen_set_mic, get_autostart, set_autostart, settings_backup, settings_restore, goal_state, goal_set, train_set,
             controls::controls_state, controls::controls_assign_button, controls::controls_set_key, controls::controls_clear_button, controls::controls_test])
         .setup(move |app| {
             // Parte con Windows (si può togliere da Impostazioni → App → Avvio)

@@ -152,6 +152,83 @@ pub fn pit_window(lap: i32, remain: f32, fuel: f32, per: f32, tank: f32) -> Opti
     (first <= last).then_some((first, last))
 }
 
+/// F1 · battaglia con la stessa auto: in quali curve sei più forte tu e in quali lei
+#[derive(Default)]
+pub struct Battle {
+    rival: i32,
+    laps: i32,
+    said: i32,
+    last_lapc: i32,
+    last: (f64, f64),
+    my_in: Vec<Option<f64>>,
+    rv_in: Vec<Option<f64>>,
+    my_dt: Vec<Option<f64>>,
+    rv_dt: Vec<Option<f64>>,
+    diffs: Vec<Vec<f64>>,
+}
+
+impl Battle {
+    /// `zones`: curve (inizio, fine) in frazioni di giro; `t`: ora della sessione. Restituisce la frase da dire, se c'è.
+    pub fn update(&mut self, rival: i32, rival_num: &str, my_pct: f64, rv_pct: f64, t: f64, zones: &[(f64, f64)], my_lapc: i32) -> Option<String> {
+        let z = zones.len();
+        if rival < 0 || z == 0 {
+            if rival < 0 {
+                self.rival = -1;
+            }
+            return None;
+        }
+        if rival != self.rival || self.diffs.len() != z {
+            *self = Battle { rival, laps: 0, said: 0, last_lapc: my_lapc, last: (my_pct, rv_pct), my_in: vec![None; z], rv_in: vec![None; z], my_dt: vec![None; z], rv_dt: vec![None; z], diffs: vec![vec![]; z] };
+            return None;
+        }
+        for (i, (s, e)) in zones.iter().enumerate() {
+            if self.last.0 < *s && my_pct >= *s {
+                self.my_in[i] = Some(t);
+            }
+            if self.last.0 < *e && my_pct >= *e {
+                self.my_dt[i] = self.my_in[i].map(|t0| t - t0);
+            }
+            if self.last.1 < *s && rv_pct >= *s {
+                self.rv_in[i] = Some(t);
+            }
+            if self.last.1 < *e && rv_pct >= *e {
+                self.rv_dt[i] = self.rv_in[i].map(|t0| t - t0);
+            }
+        }
+        self.last = (my_pct, rv_pct);
+        if my_lapc <= self.last_lapc {
+            return None;
+        }
+        // giro finito insieme: confronto curva per curva
+        self.last_lapc = my_lapc;
+        self.laps += 1;
+        for i in 0..z {
+            if let (Some(a), Some(b)) = (self.my_dt[i], self.rv_dt[i]) {
+                self.diffs[i].push(a - b);
+                if self.diffs[i].len() > 3 {
+                    self.diffs[i].remove(0);
+                }
+            }
+            self.my_dt[i] = None;
+            self.rv_dt[i] = None;
+        }
+        if self.laps < 3 || self.laps - self.said < 3 {
+            return None;
+        }
+        let avg: Vec<Option<f64>> = self.diffs.iter().map(|d| (d.len() >= 2).then(|| d.iter().sum::<f64>() / d.len() as f64)).collect();
+        let mine = avg.iter().enumerate().filter_map(|(i, a)| a.filter(|x| *x < -0.05).map(|x| (i, x))).min_by(|a, b| a.1.total_cmp(&b.1));
+        let his = avg.iter().enumerate().filter_map(|(i, a)| a.filter(|x| *x > 0.05).map(|x| (i, x))).max_by(|a, b| a.1.total_cmp(&b.1));
+        let text = match (mine, his) {
+            (Some((a, _)), Some((b, _))) => format!("Battaglia con il {rival_num}: sei più forte in curva {}, lui in curva {}", a + 1, b + 1),
+            (Some((a, _)), None) => format!("Battaglia con il {rival_num}: sei più forte in curva {}, lì puoi attaccare", a + 1),
+            (None, Some((b, _))) => format!("Battaglia con il {rival_num}: lui è più forte in curva {}", b + 1),
+            _ => return None,
+        };
+        self.said = self.laps;
+        Some(text)
+    }
+}
+
 /// Dove rientri se ti fermi adesso: (posizione, auto davanti con distacco, auto dietro con distacco).
 /// `cars`: (numero, posizione, tempo dietro al leader) delle altre auto in classifica.
 pub fn rejoin(my_f2: f32, loss: f32, cars: &[(String, i32, f32)]) -> (i32, Option<(String, f32)>, Option<(String, f32)>) {
@@ -178,6 +255,30 @@ pub fn rejoin(my_f2: f32, loss: f32, cars: &[(String, i32, f32)]) -> (i32, Optio
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn battaglia() {
+        let zones = vec![(0.1, 0.2), (0.5, 0.6)];
+        let mut b = Battle::default();
+        let mut out = None;
+        // 4 giri: io più veloce nella curva 1 (0,2 s), lui nella curva 2 (0,3 s)
+        for lap in 0..4 {
+            let base = lap as f64 * 100.0;
+            for k in 0..=1000 {
+                let p = k as f64 / 1000.0;
+                let my_t = base + p * 100.0 - if p > 0.15 { 0.2 } else { 0.0 } + if p > 0.55 { 0.3 } else { 0.0 };
+                let _ = my_t;
+                let t = base + p * 100.0;
+                // tempi diversi in curva: si simulano spostando la posizione dell'avversario
+                let rv = (p - if (0.1..0.2).contains(&p) { 0.002 } else if (0.5..0.6).contains(&p) { -0.003 } else { 0.0 }).clamp(0.0, 0.999);
+                let lapc = if k == 1000 { lap + 1 } else { lap };
+                if let Some(x) = b.update(7, "7", p.min(0.999), rv, t, &zones, lapc) {
+                    out = Some(x);
+                }
+            }
+        }
+        assert!(out.is_some());
+    }
 
     #[test]
     fn passo_e_finestra() {

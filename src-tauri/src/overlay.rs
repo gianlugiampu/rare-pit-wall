@@ -708,7 +708,7 @@ fn start_reader(app: AppHandle) {
                             x if x.contains("Qualify") => 1,
                             _ => 0,
                         };
-                        fast.coach = Some(coach_live.step(&plan, fast.lap_pct, fast.lap_cur, fast.brake, game.on_track && !ok(s, "OnPitRoad"), sess));
+                        fast.coach = Some(coach_live.step(&plan, fast.lap_pct, fast.lap_cur, fast.brake, fast.speed_kmh, game.on_track && !ok(s, "OnPitRoad"), sess));
                     }
                     if let Some((d, lap, name)) = crate::coach::mate_delta(fast.lap_pct, fast.lap_cur) {
                         fast.delta_mate = Some(d);
