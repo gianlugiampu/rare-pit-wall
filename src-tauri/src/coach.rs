@@ -33,6 +33,23 @@ impl Lap {
 pub static MATE: Mutex<Option<(String, String, Lap)>> = Mutex::new(None);
 /// Riferimento scelto nelle impostazioni: "mio" o "compagno"
 pub static PREF: Mutex<String> = Mutex::new(String::new());
+/// Pista e auto della sessione in corso (chiave come in MATE), per non usare il giro del compagno di un'altra pista
+pub static CUR: Mutex<String> = Mutex::new(String::new());
+
+/// P11 · delta in diretta sul giro del compagno: (delta in secondi, tempo del suo giro, nome)
+pub fn mate_delta(pct: f32, lap_cur: f32) -> Option<(f32, f32, String)> {
+    let m = MATE.lock().unwrap();
+    let (key, name, lap) = m.as_ref()?;
+    if *key != *CUR.lock().unwrap() || lap_cur <= 0.0 || !(0.0..=1.0).contains(&pct) {
+        return None;
+    }
+    let x = pct as f64 * (lap.n - 1) as f64;
+    let i = (x.floor() as usize).min(lap.n - 2);
+    let f = x - i as f64;
+    let t = lap.t[i] + (lap.t[i + 1] - lap.t[i]) * f;
+    Some(((lap_cur as f64 - t) as f32, *lap.t.last()? as f32, name.clone()))
+}
+
 /// Consiglio pronto da dire (lo prende l'ingegnere)
 pub static OUT: Mutex<Option<String>> = Mutex::new(None);
 

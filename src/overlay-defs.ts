@@ -91,6 +91,7 @@ export const DEFS: Record<string, Def> = {
           ["best", "Il tuo giro migliore"],
           ["session", "Il migliore della sessione"],
           ["last", "Il tuo ultimo giro"],
+          ["mate", "Il compagno più veloce (dal sito)"],
         ],
         def: "best",
       },

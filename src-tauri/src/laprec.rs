@@ -373,7 +373,8 @@ impl LapRec {
 
     /// Dati da mandare al sito: ogni 3 minuti se ci sono giri nuovi, oppure subito (`force`, fine sessione)
     pub fn take_body(&mut self, force: bool) -> Option<serde_json::Value> {
-        if !self.changed {
+        // a fine sessione si manda anche senza giri nuovi: serve al riassunto per il pilota (P11)
+        if !self.changed && !(force && self.lap_count() > 0) {
             return None;
         }
         if !force && self.sent_at.map(|t| t.elapsed() < Duration::from_secs(180)).unwrap_or(false) {
@@ -381,7 +382,9 @@ impl LapRec {
         }
         self.changed = false;
         self.sent_at = Some(Instant::now());
-        Some(self.body())
+        let mut b = self.body();
+        b["final"] = serde_json::json!(force);
+        Some(b)
     }
 
     pub fn lap_count(&self) -> usize {

@@ -11,6 +11,7 @@ type Fast = {
   connected: boolean; onTrack: boolean; throttle: number; brake: number; clutch: number; steer: number; steerMax: number;
   gear: number; speedKmh: number; rpm: number; lapPct: number; lapCur: number;
   deltaBest: number | null; deltaSession: number | null; deltaLast: number | null; carLr: number; yaw: number;
+  deltaMate?: number | null; mateLap?: number | null; mateName?: string | null;
 };
 type Slow = {
   session: string; lap: number; lapsRemain: number | null; timeRemain: number | null;
@@ -66,7 +67,7 @@ function buildDelta(it: Item): View {
   top.className = "top";
   const est = span(`Stimato <b>${dash}</b>`, "muted");
   const big = span(dash, "big d");
-  const refName = { best: "Migliore", session: "Sessione", last: "Ultimo" }[String(o("reference"))] ?? "Migliore";
+  const refName = { best: "Migliore", session: "Sessione", last: "Ultimo", mate: "Compagno" }[String(o("reference"))] ?? "Migliore";
   const ref = span(`${refName} <b class="best">${dash}</b>`, "muted");
   if (o("estimate")) top.append(est); else top.append(span(""));
   top.append(big);
@@ -91,7 +92,8 @@ function buildDelta(it: Item): View {
     el,
     update(f, s) {
       const r = String(o("reference"));
-      const d = r === "session" ? f.deltaSession : r === "last" ? f.deltaLast : f.deltaBest;
+      const d = r === "session" ? f.deltaSession : r === "last" ? f.deltaLast : r === "mate" ? f.deltaMate ?? null : f.deltaBest;
+      if (r === "mate" && f.mateName) ref.firstChild!.textContent = `${f.mateName} `;
       big.textContent = d == null ? dash : fmtDelta(d);
       big.className = `big d ${tone(d)}`;
       const fill = bar.firstElementChild as HTMLElement;
@@ -100,7 +102,7 @@ function buildDelta(it: Item): View {
       fill.style.left = d != null && d < 0 ? `${50 - w}%` : "50%";
       fill.style.background = d != null && d < 0 ? "var(--lap-pb)" : "var(--lap-invalid)";
       if (s) {
-        const refTime = r === "session" ? s.sessionBest : r === "last" ? s.lastLap : s.bestLap;
+        const refTime = r === "session" ? s.sessionBest : r === "last" ? s.lastLap : r === "mate" ? f.mateLap ?? null : s.bestLap;
         (ref.lastElementChild as HTMLElement).textContent = lapTime(refTime);
         (est.lastElementChild as HTMLElement).textContent = refTime && d != null ? lapTime(refTime + d) : dash;
         (last.lastElementChild as HTMLElement).textContent = lapTime(s.lastLap);

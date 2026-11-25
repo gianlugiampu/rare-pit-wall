@@ -332,6 +332,7 @@ pub fn cycle_delta(app: &AppHandle) {
         let next = match cur.as_str() {
             "best" => "session",
             "session" => "last",
+            "last" => "mate",
             _ => "best",
         };
         if !it.opts.is_object() {
@@ -346,6 +347,7 @@ pub fn cycle_delta(app: &AppHandle) {
     let name = match next {
         "session" => "Delta sul migliore della sessione",
         "last" => "Delta sul tuo ultimo giro",
+        "mate" => "Delta sul compagno più veloce",
         _ => "Delta sul tuo giro migliore",
     };
     // lo dice anche la voce, così si sa cosa si sta guardando senza staccare gli occhi dalla pista
@@ -383,6 +385,10 @@ struct Fast {
     delta_best: Option<f32>,
     delta_session: Option<f32>,
     delta_last: Option<f32>,
+    /// P11: delta sul giro del compagno più veloce (stessa pista e auto), il suo tempo e il nome
+    delta_mate: Option<f32>,
+    mate_lap: Option<f32>,
+    mate_name: Option<String>,
     /// CarLeftRight: 2 auto a sinistra, 3 a destra, 4 ai due lati, 5 due a sinistra, 6 due a destra
     car_lr: i32,
     /// P8.5: auto inquadrata dalla telecamera di iRacing (le grafiche per la diretta seguono lei)
@@ -628,6 +634,11 @@ fn start_reader(app: AppHandle) {
                     fast.delta_session = ok(s, "LapDeltaToSessionBestLap_OK").then(|| f(s, "LapDeltaToSessionBestLap"));
                     fast.delta_last = ok(s, "LapDeltaToSessionLastlLap_OK").then(|| f(s, "LapDeltaToSessionLastlLap"));
                     fast.yaw = f(s, "Yaw");
+                    if let Some((d, lap, name)) = crate::coach::mate_delta(fast.lap_pct, fast.lap_cur) {
+                        fast.delta_mate = Some(d);
+                        fast.mate_lap = Some(lap);
+                        fast.mate_name = Some(name);
+                    }
                     fast.car_lr = s.get("CarLeftRight").map(|v| v.as_i32()).unwrap_or(0);
                     fast.cam = s.get("CamCarIdx").map(|v| v.as_i32()).unwrap_or(-1);
                     // P8.6: con la Mappa aperta e la pista non ancora disegnata, si registra il giro

@@ -4,7 +4,7 @@
 
 mod ascolto;
 mod clips;
-mod coach;
+pub mod coach;
 mod controls;
 mod dash;
 mod engineer;
@@ -412,12 +412,12 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         live_probe(&app, shared.clone(), subsession.parse().unwrap_or(0), session.clone());
                     }
                     if let Some(r) = laprec.as_ref() {
-                        if coach::prefer_mate() {
-                            let k = r.ref_key();
-                            if k != mate_asked && !k.starts_with("0-") && !k.ends_with("-0") {
-                                mate_asked = k;
-                                fetch_reference(&app, r.ref_key());
-                            }
+                        // giro del compagno più veloce: per il coach e per il Delta «compagno»
+                        let k = r.ref_key();
+                        if k != mate_asked && !k.starts_with("0-") && !k.ends_with("-0") {
+                            mate_asked = k.clone();
+                            *coach::CUR.lock().unwrap() = k;
+                            fetch_reference(&app, r.ref_key());
                         }
                     }
                     if let Some(r) = laprec.as_mut() {
