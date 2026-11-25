@@ -67,6 +67,10 @@ pub struct Detector {
     my_inc: i32,
     my_idx: usize,
     pub dirty: bool,
+    /// diagnosi (registro del sito): letture, stato più alto visto, letture con la tua auto senza posizione
+    diag_ticks: u64,
+    diag_state: i32,
+    diag_skip: u64,
 }
 
 const WHITE: u32 = 0x2;
@@ -99,6 +103,23 @@ impl Detector {
             team.push(my_idx);
         }
         self.team = team;
+    }
+
+    /// Riga di diagnosi per il registro del sito (per capire perché una gara ha pochi momenti)
+    pub fn diag(&self) -> String {
+        let me = self.cars.get(&self.my_idx);
+        format!(
+            "auto lette {}, team {:?}, tu #{} (idx {}, in elenco: {}), letture {}, senza posizione {}, stato max {}, giri visti {}",
+            self.cars.len(),
+            self.team,
+            me.map(|c| c.number.clone()).unwrap_or_default(),
+            self.my_idx,
+            me.is_some(),
+            self.diag_ticks,
+            self.diag_skip,
+            self.diag_state,
+            self.lap_done.get(&self.my_idx).copied().unwrap_or(-1)
+        )
     }
 
     /// Nuova gara: si riparte da zero
@@ -184,6 +205,11 @@ impl Detector {
             self.add("start".into(), "start", car, "Partenza".into(), 1, t);
         }
 
+        self.diag_ticks += 1;
+        self.diag_state = self.diag_state.max(state);
+        if self.my_idx < n && prog[self.my_idx].is_nan() {
+            self.diag_skip += 1;
+        }
         let team = self.team.clone();
         for &a in &team {
             if prog[a].is_nan() {

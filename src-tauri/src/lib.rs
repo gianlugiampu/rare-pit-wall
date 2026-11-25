@@ -437,7 +437,7 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         let token = load_config(&app).token;
                         // P6: gara finita (cambio di sessione): si mandano i momenti; nuova gara: si riparte
                         if detector.race.subsession != 0 {
-                            site_log(token.clone(), format!("gara finita: {} momenti trovati", detector.race.moments.len()));
+                            site_log(token.clone(), format!("gara finita: {} momenti trovati · {}", detector.race.moments.len(), detector.diag()));
                         }
                         if detector.dirty {
                             detector.dirty = false;
@@ -879,7 +879,7 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                 sdk = None;
                 info_rev = -1;
                 if detector.race.subsession != 0 {
-                    site_log(load_config(&app).token, format!("iRacing chiuso durante/dopo la gara: {} momenti trovati", detector.race.moments.len()));
+                    site_log(load_config(&app).token, format!("iRacing chiuso durante/dopo la gara: {} momenti trovati · {}", detector.race.moments.len(), detector.diag()));
                     detector.race.subsession = 0;
                 }
                 if detector.dirty {
