@@ -502,6 +502,7 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                     // P4: distacchi da chi precede e da chi segue (tempo dietro al leader, CarIdxF2Time)
                     let me = s.get("PlayerCarIdx").map(|v| v.as_i32()).unwrap_or(-1);
                     let (mut gap_ahead, mut gap_behind) = (None, None);
+                    let (mut ahead_idx, mut behind_idx) = (-1, -1);
                     if me >= 0 && st.position > 0 {
                         let my_f2 = s.get_at("CarIdxF2Time", me as usize).map(|v| v.as_f64() as f32).unwrap_or(0.0);
                         for i in 0..64 {
@@ -509,8 +510,10 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                             let f2 = s.get_at("CarIdxF2Time", i).map(|v| v.as_f64() as f32).unwrap_or(0.0);
                             if p == st.position - 1 {
                                 gap_ahead = Some(my_f2 - f2).filter(|g| *g > 0.0 && *g < 600.0);
+                                ahead_idx = i as i32;
                             } else if p == st.position + 1 {
                                 gap_behind = Some(f2 - my_f2).filter(|g| *g > 0.0 && *g < 600.0);
+                                behind_idx = i as i32;
                             }
                         }
                     }
@@ -577,6 +580,8 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         gap_behind,
                         speed_kmh: st.speed_kmh as f32,
                         slow_ahead_m,
+                        ahead_idx,
+                        behind_idx,
                     };
                     let settings = shared.engineer.lock().unwrap().clone();
                     eng.update(&tele, &settings);
@@ -588,6 +593,10 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                             eng.apply(&settings);
                             eng.say_now(&text);
                         }
+                    }
+                    // P13: dati per l'overlay «Stratega», una volta al secondo
+                    if tick % 20 == 0 {
+                        overlay::push_stratega(&app, eng.view(&tele));
                     }
                     // P12: consiglio del coach dopo un tuo giro pulito (fuori gara)
                     let tip = coach::OUT.lock().unwrap().take();

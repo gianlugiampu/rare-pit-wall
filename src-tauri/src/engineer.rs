@@ -67,6 +67,9 @@ pub struct Tele {
     pub speed_kmh: f32,
     /// P13: auto ferma o lentissima in pista davanti, a quanti metri
     pub slow_ahead_m: Option<f32>,
+    /// P13: auto davanti e dietro in classifica (indice iRacing, -1 = nessuna)
+    pub ahead_idx: i32,
+    pub behind_idx: i32,
 }
 
 // Bandiere di iRacing (SessionFlags)
@@ -233,6 +236,29 @@ impl Engineer {
     fn push_urgent(&mut self, text: String) {
         self.queue.retain(|m| !m.urgent);
         self.queue.push_front(Msg { text, important: true, urgent: true, at: Instant::now() });
+    }
+
+    /// P13 · dati per l'overlay «Stratega» (stessi calcoli degli avvisi a voce)
+    pub fn view(&self, t: &Tele) -> serde_json::Value {
+        let (rate_a, rate_b) = (closing(&self.hist_ahead), closing(&self.hist_behind));
+        let catch = |gap: Option<f32>, rate: Option<f32>, margin: f32| match (gap, rate) {
+            (Some(g), Some(r)) if r > 0.05 => Some(((g - margin) / r).ceil().max(1.0) as i32),
+            _ => None,
+        };
+        let goal = match (t.laps_remain, t.gap_behind) {
+            (Some(rem), Some(g)) if (1..=3).contains(&rem) && t.last_lap > 0.0 => Some(needed_time(g, rate_b.unwrap_or(0.0), rem, t.last_lap)),
+            _ => None,
+        };
+        serde_json::json!({
+            "race": t.session == "Race",
+            "pos": t.position,
+            "lapsRemain": t.laps_remain,
+            "lastLap": t.last_lap,
+            "ahead": { "idx": t.ahead_idx, "gap": t.gap_ahead, "hist": self.hist_ahead, "rate": rate_a, "laps": catch(t.gap_ahead, rate_a, 0.5) },
+            "behind": { "idx": t.behind_idx, "gap": t.gap_behind, "hist": self.hist_behind, "rate": rate_b, "laps": catch(t.gap_behind, rate_b, 0.3) },
+            "goal": goal,
+            "slow": t.slow_ahead_m.filter(|_| t.on_track && t.speed_kmh > 60.0),
+        })
     }
 
     /// P12: consiglio del coach (dopo un giro pulito, fuori gara)
@@ -750,11 +776,16 @@ fn msg_ahead(gap: f32, rate: f32, laps_remain: Option<i32>) -> Option<String> {
     })
 }
 
-/// Ultimi giri: che tempo basta per tenere dietro chi ti segue
-fn msg_endgame(gap: f32, rate: f32, laps_remain: i32, last_lap: f32) -> String {
+/// Tempo sul giro che basta per tenere dietro chi ti segue fino alla fine
+fn needed_time(gap: f32, rate: f32, laps_remain: i32, last_lap: f32) -> f32 {
     let rem = laps_remain.max(1) as f32;
     let their = last_lap - rate; // passo di chi ti segue
-    let needed = their + (gap - 0.3) / rem;
+    their + (gap - 0.3) / rem
+}
+
+/// Ultimi giri: che tempo basta per tenere dietro chi ti segue
+fn msg_endgame(gap: f32, rate: f32, laps_remain: i32, last_lap: f32) -> String {
+    let needed = needed_time(gap, rate, laps_remain, last_lap);
     if needed - last_lap >= 2.0 {
         "Hai margine su chi ti segue: porta a casa la posizione".into()
     } else {

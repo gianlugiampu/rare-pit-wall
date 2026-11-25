@@ -25,6 +25,11 @@ const pits = new Map<number, number>();
 const wasInPit = new Map<number, boolean>();
 let pitSession = "";
 
+/** P13: pilota di un'auto (per lo Stratega) */
+export function driverOf(idx: number): Driver | undefined {
+  return drivers.get(idx);
+}
+
 export function setDrivers(d: Drivers) {
   drivers = new Map(d.list.map((x) => [x.idx, x]));
   const fromQuali = Object.entries(d.start ?? {});

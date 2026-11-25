@@ -41,6 +41,8 @@ pub const KINDS: &[Kind] = &[
     kind("benzina", "Benzina", (190.0, 130.0), (0.88, 0.66)),
     kind("pedali", "Pedali", (340.0, 74.0), (0.66, 0.86)),
     kind("mappa", "Mappa", (230.0, 170.0), (0.1, 0.55)),
+    // P13: Stratega (bozza v1 approvata il 25/11/2026), spento di base: si accende dalla scheda Overlay
+    Kind { on: false, ..kind("stratega", "Stratega", (330.0, 150.0), (0.84, 0.42)) },
     // P8.4: box del pit wall (spento di base, compare solo quando arriva un messaggio) e radar a luci
     Kind { on: false, ..kind("box", "Box del pit wall", (330.0, 34.0), (0.16, 0.34)) },
     // radar a barre: due barre ai lati della tua auto, spostabili e ridimensionabili (scelta di Gianluca del 24/11/2026)
@@ -755,7 +757,7 @@ fn start_reader(app: AppHandle) {
             // il radar a barre vuole le auto più spesso (30 volte al secondo) per muoversi fluido
             let bars_open = app.get_webview_window(&label("radar-barre")).is_some();
             let need_cars = (bars_open && tick % 2 == 0)
-                || (tick % 6 == 0 && (obs || ["relative", "classifica", "mappa"].iter().any(|id| app.get_webview_window(&label(id)).is_some())));
+                || (tick % 6 == 0 && (obs || ["relative", "classifica", "mappa", "stratega"].iter().any(|id| app.get_webview_window(&label(id)).is_some())));
             let mut cars: Vec<Car> = vec![];
             if let (true, Some(s)) = (need_cars && fast.connected, sdk.as_mut()) {
                 let gi = |s: &mut irsdk::Irsdk, k: &str, i: usize| s.get_at(k, i).map(|v| v.as_i32()).unwrap_or(0);
@@ -834,6 +836,13 @@ pub fn obs_http(path: &str) -> Option<(&'static str, Vec<u8>)> {
         "logo.svg" => ("image/svg+xml", OBS_LOGO.as_bytes().to_vec()),
         _ => ("text/html; charset=utf-8", OBS_PAGE.as_bytes().to_vec()),
     })
+}
+
+/// P13 · dati dello Stratega (dall'ingegnere, una volta al secondo)
+pub fn push_stratega(app: &AppHandle, v: serde_json::Value) {
+    if app.get_webview_window(&label("stratega")).is_some() {
+        let _ = app.emit_filter("ov-stratega", v, is_overlay_target);
+    }
 }
 
 /// P8.4 · messaggio del team dal pit wall: compare nel «Box del pit wall» (se acceso)

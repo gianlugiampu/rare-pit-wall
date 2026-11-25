@@ -5,7 +5,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";
 import { DEFS, item, opt, type Config, type Item } from "./overlay-defs";
-import { buildClassifica, buildMappa, buildRelative, demoCars, demoDrivers, demoMap, onMapDirection, setDrivers, setMap, type Car, type CarView, type Drivers, type TrackMap } from "./overlay-cars";
+import { buildClassifica, buildMappa, buildRelative, demoCars, demoDrivers, demoMap, driverOf, onMapDirection, setDrivers, setMap, type Car, type CarView, type Drivers, type TrackMap } from "./overlay-cars";
 
 type Fast = {
   connected: boolean; onTrack: boolean; throttle: number; brake: number; clutch: number; steer: number; steerMax: number;
@@ -404,6 +404,82 @@ function buildRadarBars(it: Item): View {
   };
 }
 
+// ——— Stratega (P13, bozza v1 approvata): dati dall'ingegnere una volta al secondo ———
+type StratCar = { idx: number; gap: number | null; hist: number[]; rate: number | null; laps: number | null };
+type Strat = { race: boolean; pos: number; lapsRemain: number | null; lastLap: number; ahead: StratCar; behind: StratCar; goal: number | null; slow: number | null };
+let strat: Strat | null = null;
+const demoStrat: Strat = {
+  race: true, pos: 6, lapsRemain: 11, lastLap: 105.8,
+  ahead: { idx: 4, gap: 2.4, hist: [3.6, 3.2, 2.8, 2.4], rate: 0.4, laps: 5 },
+  behind: { idx: 6, gap: 1.8, hist: [3.3, 2.8, 2.3, 1.8], rate: 0.5, laps: 4 },
+  goal: null, slow: null,
+};
+const g1 = (x: number) => x.toFixed(1).replace(".", ",");
+function buildStratega(it: Item): View {
+  const o = (k: string) => opt(it, "stratega", k);
+  const el = document.createElement("div");
+  el.className = "panel stratega tab";
+  const row = (c: StratCar, isAhead: boolean, cars: Car[] | null, lapsRemain: number | null) => {
+    if (c.idx < 0 || c.gap == null) return "";
+    const d = driverOf(c.idx);
+    const who = `<b>#${esc(d?.number ?? "")}</b>${o("names") ? esc(d?.name ?? "") : ""}`;
+    let sub = `<span class="muted">distacco stabile</span><span></span>`;
+    const r = c.rate;
+    if (r != null && Math.abs(r) >= 0.05) {
+      // recupero: buono per te davanti (lo prendi), cattivo dietro (ti prende)
+      const good = isAhead ? r > 0 : r < 0;
+      const toneR = good ? "pb" : isAhead ? "bad" : r < 0.25 ? "slow" : "bad";
+      const what = isAhead ? (r > 0 ? `recuperi ${g1(r)} a giro` : `perdi ${g1(-r)} a giro`) : r > 0 ? `recupera ${g1(r)} a giro` : `perde ${g1(-r)} a giro`;
+      let when = "";
+      if (r > 0 && c.laps != null) {
+        const late = lapsRemain != null && c.laps > lapsRemain;
+        if (isAhead) when = late ? `<span class="muted">non lo prendi</span>` : `<span class="pb">${c.laps <= 1 ? "ce l'hai: attacca" : `lo prendi in ${c.laps} giri`}</span>`;
+        else when = late ? `<span class="pb">non ti prende</span>` : `<span class="bad">${c.laps <= 1 ? "è sotto: difendi" : `ti prende in ${c.laps} giri`}</span>`;
+      }
+      const bars = o("bars") && c.hist.length > 1 ? trendBars(c.hist, isAhead) : "";
+      sub = `<span class="${toneR}">${bars}${what}</span>${when || "<span></span>"}`;
+    }
+    void cars;
+    return `<div class="st-row"><span class="lbl">${isAhead ? "Davanti" : "Dietro"}</span><span class="who">${who}</span><span class="gap">${g1(c.gap)}</span><span class="sub">${sub}</span></div>`;
+  };
+  return {
+    el,
+    update(_f, s, cars) {
+      const st = strat ?? (cfg.edit || !IN_APP ? demoStrat : null);
+      const ss = s ?? lastSlow;
+      el.hidden = !st || (!st.race && !cfg.edit && IN_APP);
+      if (!st || el.hidden) return;
+      const lap = ss ? `giro ${ss.lap}${ss.lapsTotal ? `/${ss.lapsTotal}` : ""}` : "";
+      let html = `<div class="hd"><span class="d">STRATEGA</span><span>${st.pos > 0 ? `P${st.pos}` : ""}${lap ? ` · ${lap}` : ""}</span></div>`;
+      if (o("alert") && st.slow != null) html += `<div class="st-alert"><span class="d">AUTO FERMA</span><span>davanti a ${Math.max(50, Math.round(st.slow / 50) * 50)} m</span></div>`;
+      html += row(st.ahead, true, cars ?? lastCars, st.lapsRemain) + row(st.behind, false, cars ?? lastCars, st.lapsRemain);
+      if (st.goal != null) {
+        html += `<div class="st-goal"><span class="muted">Per tenere P${st.pos} basta</span><span class="t">${lapTime(st.goal, 1).replace(".", ",")}</span></div>`;
+      } else if (o("mate")) {
+        const list = cars ?? lastCars;
+        const me = ss?.me ?? -1;
+        const mine = list?.find((c) => c.i === me);
+        const mate = list?.filter((c) => c.i !== me && c.pos > 0 && driverOf(c.i)?.rare).sort((a, b) => a.pos - b.pos)[0];
+        if (mate && mine) {
+          const d = driverOf(mate.i);
+          const gap = mate.f2 - mine.f2;
+          html += `<div class="st-goal"><span class="muted">Compagno <b>#${esc(d?.number ?? "")} ${esc(d?.name ?? "")}</b> P${mate.pos}</span><span>${gap > 0 ? "+" : "-"}${g1(Math.abs(gap))}</span></div>`;
+        }
+      }
+      if (html !== el.dataset.html) {
+        el.dataset.html = html;
+        el.innerHTML = html;
+      }
+    },
+  };
+}
+/** 4 barrette: i distacchi degli ultimi giri (più alte = più vicini) */
+function trendBars(hist: number[], _isAhead: boolean): string {
+  const max = Math.max(...hist), min = Math.min(...hist);
+  return `<span class="trend">${hist.map((h) => `<i style="height:${max === min ? 7 : 4 + Math.round((6 * (max - h)) / (max - min))}px"></i>`).join("")}</span>`;
+}
+const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+
 // ——— Box del pit wall (P8.4): compare solo quando arriva un messaggio ———
 let boxMsg: { author: string; text: string; at: number } | null = null;
 function buildBox(it: Item): View {
@@ -442,7 +518,7 @@ function carView(b: (it: Item) => CarView): (it: Item) => View {
 const BUILDERS: Record<string, (it: Item) => View> = {
   delta: buildDelta, sessione: buildSessione, benzina: buildBenzina, pedali: buildPedali,
   relative: carView(buildRelative), classifica: carView(buildClassifica),
-  radar: buildRadar, box: buildBox,
+  radar: buildRadar, box: buildBox, stratega: buildStratega,
   mappa: (it) => {
     const v = buildMappa(it);
     return {
@@ -544,7 +620,7 @@ function onFrame(fr: Frame) {
       if (mapRev === -1) setMap(demoMap());
       else if (IN_APP) invoke<TrackMap | null>("overlay_map").then(setMap);
     }
-    if (fr.slow.driversRev !== driversRev && (id === "relative" || id === "classifica" || id === "mappa")) {
+    if (fr.slow.driversRev !== driversRev && (id === "relative" || id === "classifica" || id === "mappa" || id === "stratega")) {
       driversRev = fr.slow.driversRev;
       if (driversRev === -1) setDrivers(demoDrivers());
       else if (IN_APP) invoke<Drivers>("overlay_drivers").then(setDrivers);
@@ -561,6 +637,7 @@ async function start() {
     id = hello.id;
     side = hello.side;
     await listen<{ author: string; text: string }>("ov-box", (e) => (boxMsg = { ...e.payload, at: Date.now() }));
+    await listen<Strat>("ov-stratega", (e) => (strat = e.payload));
     // P8.6: verso del disegno di iRacing capito dalla tua auto → si salva per quella pista
     onMapDirection((reversed) => invoke("overlay_map_dir", { reversed }));
     cfg = hello.config;

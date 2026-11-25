@@ -164,3 +164,23 @@ b { font-weight: 700; color: #fff; }
 .rbar.r { right: 6px; }
 .rbar em { position: absolute; left: -5px; right: -5px; top: 50%; height: 2px; margin-top: -1px; border-radius: 2px; background: rgb(255 255 255 / .7); }
 .rbar i { position: absolute; left: 0; right: 0; border-radius: 99px; display: none; }
+
+/* P13 · Stratega (bozza v1 approvata il 25/11/2026) */
+.stratega { width: 330px; }
+.stratega .hd { display: flex; align-items: center; justify-content: space-between; height: 24px; padding: 0 10px; background: rgb(150 0 255 / .22); }
+.stratega .hd .d { font-size: 11px; letter-spacing: .06em; color: #fff; }
+.stratega .hd span:last-child { font-size: 11px; color: var(--ink-200); }
+.st-row { display: grid; grid-template-columns: 58px 1fr auto; align-items: center; gap: 8px; padding: 6px 10px; border-top: 1px solid rgb(255 255 255 / .06); }
+.st-row .lbl { font-size: 10px; text-transform: uppercase; letter-spacing: .08em; color: var(--ink-400); font-weight: 700; }
+.st-row .who { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.st-row .who b { margin-right: 4px; }
+.st-row .gap { font-size: 15px; font-weight: 700; color: #fff; text-align: right; }
+.st-row .sub { grid-column: 2 / 4; font-size: 11px; display: flex; justify-content: space-between; gap: 8px; white-space: nowrap; }
+.trend { display: inline-flex; gap: 2px; align-items: flex-end; height: 10px; margin-right: 6px; vertical-align: -1px; }
+.trend i { width: 4px; border-radius: 1px; background: currentColor; }
+.st-goal { padding: 7px 10px; border-top: 1px solid rgb(255 255 255 / .06); display: flex; justify-content: space-between; align-items: center; }
+.st-goal .t { font-size: 17px; font-weight: 700; color: #fff; }
+.st-alert { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--lap-invalid); color: #fff; font-weight: 700; animation: st-blink .8s steps(2) infinite; }
+.st-alert .d { font-size: 12px; }
+@keyframes st-blink { 50% { background: #a3122b; } }
+

@@ -44,6 +44,17 @@ export const DEFS: Record<string, Def> = {
       { key: "around", label: "Auto intorno a te", options: [["2", "2 + 2"], ["3", "3 + 3"], ["4", "4 + 4"], ["5", "5 + 5"]], def: "3" },
     ],
   },
+  stratega: {
+    name: "Stratega",
+    desc: "Solo in gara: auto davanti e dietro con quanto si recupera a giro e tra quanti giri vi prendete, il compagno, l'auto ferma davanti e, negli ultimi giri, il tempo che basta per tenere la posizione.",
+    defOn: false,
+    fields: [
+      { key: "names", label: "Nomi dei piloti", def: true },
+      { key: "bars", label: "Barrette degli ultimi giri", def: true },
+      { key: "mate", label: "Compagno di squadra", def: true },
+      { key: "alert", label: "Auto ferma davanti", def: true },
+    ],
+  },
   delta: {
     name: "Delta",
     desc: "Quanto sei avanti o indietro rispetto al giro di riferimento, con la barra verde/rossa.",
