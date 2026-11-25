@@ -141,6 +141,14 @@ function showTab(id: string) {
   if (id === "replay") loadMoments();
 }
 
+// Stabilità · errori della finestra nel registro del sito (al massimo 5 per avvio)
+let errorsSent = 0;
+const reportError = (m: string) => {
+  if (errorsSent++ < 5) invoke("report_error", { message: m }).catch(() => {});
+};
+window.addEventListener("error", (e) => reportError(`${e.message} (${e.filename?.split("/").pop()}:${e.lineno})`));
+window.addEventListener("unhandledrejection", (e) => reportError(String(e.reason)));
+
 window.addEventListener("DOMContentLoaded", async () => {
   document.querySelectorAll<HTMLElement>(".tab[data-tab]").forEach((t) => t.addEventListener("click", () => showTab(t.dataset.tab!)));
   document.querySelectorAll<HTMLButtonElement>(".subtabs button").forEach((b) =>

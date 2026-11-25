@@ -126,6 +126,9 @@ pub struct LapRec {
     best_tel: Option<(i32, f64, serde_json::Value)>,
     /// C4: telemetria dei tuoi 3 giri puliti più veloci (giro, tempo ms, dati), per confrontarli sul sito
     top_tel: Vec<(i32, f64, serde_json::Value)>,
+    /// F25: tua posizione di classe al via e alla fine del primo giro (solo in gara)
+    start_grid: Option<i32>,
+    start_lap1: Option<i32>,
     changed: bool,
     sent_at: Option<Instant>,
 }
@@ -212,6 +215,18 @@ impl LapRec {
     pub fn tick(&mut self, s: &mut irsdk::Irsdk) {
         let gi = |s: &mut irsdk::Irsdk, k: &str, i: usize| s.get_at(k, i).map(|v| v.as_i32()).unwrap_or(-1);
         let now = Instant::now();
+        // F25 · partenza: posizione al verde e alla fine del primo giro
+        if self.session_type == "Race" {
+            let state = s.get("SessionState").map(|v| v.as_i32()).unwrap_or(0);
+            let cpos = gi(s, "CarIdxClassPosition", self.me);
+            if state == 4 && self.start_grid.is_none() && cpos > 0 {
+                self.start_grid = Some(cpos);
+            }
+            if self.start_lap1.is_none() && self.start_grid.is_some() && gi(s, "CarIdxLapCompleted", self.me) >= 1 && cpos > 0 {
+                self.start_lap1 = Some(cpos);
+                self.changed = true;
+            }
+        }
         // tua auto: settori, consumo, incidenti del giro in corso
         let t = s.get("SessionTime").map(|v| v.as_f64()).unwrap_or(0.0);
         let pct = s.get("LapDistPct").map(|v| v.as_f64() as f32).unwrap_or(0.0);
@@ -396,6 +411,10 @@ impl LapRec {
             "trackName": self.track_name,
             "trackConfig": self.track_config,
             "trackInternal": self.track_internal,
+            "start": match (self.start_grid, self.start_lap1) {
+                (Some(g), Some(l)) => serde_json::json!({ "grid": g, "lap1": l, "custId": self.my_cust }),
+                _ => serde_json::Value::Null,
+            },
             "startedAt": self.started_at,
             "cars": self.cars.values().filter(|c| !c.laps.is_empty()).collect::<Vec<_>>(),
             // telemetria del tuo giro pulito più veloce (per la pagina Telemetria)

@@ -271,6 +271,36 @@ fn set_commentary(on: bool) {
     coach::COMMENT.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
+/// Stabilità · errore della finestra (JavaScript): va nel registro del sito
+#[tauri::command]
+fn report_error(app: AppHandle, message: String) {
+    site_log(load_config(&app).token, format!("errore nella finestra: {}", message.chars().take(300).collect::<String>()));
+}
+
+/// Stabilità · se il programma si chiude per un errore, il motivo si scrive in un file e si manda al sito al riavvio
+fn install_crash_log(app: &AppHandle) {
+    let Ok(dir) = app.path().app_local_data_dir() else { return };
+    let file = dir.join("errori.log");
+    // errori della volta prima: si mandano al sito e si cancellano
+    if let Ok(text) = std::fs::read_to_string(&file) {
+        for line in text.lines().filter(|l| !l.trim().is_empty()).take(5) {
+            site_log(load_config(app).token, format!("errore (chiusura imprevista): {}", line.chars().take(400).collect::<String>()));
+        }
+        let _ = std::fs::remove_file(&file);
+    }
+    let _ = std::fs::create_dir_all(&dir);
+    let prev = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        let place = info.location().map(|l| format!("{}:{}", l.file(), l.line())).unwrap_or_default();
+        let msg = info.payload().downcast_ref::<&str>().map(|s| s.to_string()).or_else(|| info.payload().downcast_ref::<String>().cloned()).unwrap_or_default();
+        if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(&file) {
+            use std::io::Write;
+            let _ = writeln!(f, "v{VERSION} · {place} · {msg}");
+        }
+        prev(info);
+    }));
+}
+
 /// P12: giro migliore del compagno più veloce (stessa pista e auto) per il coach
 fn fetch_reference(app: &AppHandle, key: String) {
     let Some(token) = load_config(app).token else { return };
@@ -1406,7 +1436,7 @@ pub fn run() {
         .manage(shared.clone())
         .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto, get_moments, jump_to_moment, export_clips, clip_status, cancel_clips, open_videos, clip_files, send_clip, make_highlight,
             overlay::overlay_state, overlay::overlay_save, overlay::overlay_edit, overlay::overlay_reset, overlay::overlay_open_settings, overlay::overlay_hello, overlay::overlay_drivers, overlay::overlay_map, overlay::overlay_map_dir, overlay::overlay_coach_ref,
-            listen_state, listen_install, listen_set_mic, get_autostart, set_autostart, settings_backup, settings_restore, goal_state, goal_set, train_set, set_commentary,
+            listen_state, listen_install, listen_set_mic, get_autostart, set_autostart, settings_backup, settings_restore, goal_state, goal_set, train_set, set_commentary, report_error,
             controls::controls_state, controls::controls_assign_button, controls::controls_set_key, controls::controls_clear_button, controls::controls_test])
         .setup(move |app| {
             // Parte con Windows (si può togliere da Impostazioni → App → Avvio)
@@ -1456,6 +1486,8 @@ pub fn run() {
                 }
             }
             let _ = APP.set(app.handle().clone());
+            // stabilità: errori in un file e nel registro del sito
+            install_crash_log(app.handle());
             // P9: comandi a voce (Vosk, scaricato la prima volta nella cartella della voce)
             ascolto::init(voice_dir(app.handle()), load_config(app.handle()).mic);
             // P4: impostazioni dell'ingegnere salvate sul PC
