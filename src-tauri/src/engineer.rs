@@ -24,11 +24,15 @@ pub struct Settings {
     pub race: bool,
     /// P13 · stratega in gara: chi arriva da dietro, chi puoi prendere, auto ferma davanti, ultimi giri
     pub strategy: bool,
+    /// P12 · coach dal vivo (fuori gara) e andamento del passo
+    pub coach: bool,
+    /// riferimento del coach: "mio" (tuo migliore della sessione) o "compagno" (il più veloce del team, dal sito)
+    pub coach_ref: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { enabled: true, voice: None, volume: 80, fuel: true, laptime: true, gaps: true, flags: true, race: true, strategy: true }
+        Settings { enabled: true, voice: None, volume: 80, fuel: true, laptime: true, gaps: true, flags: true, race: true, strategy: true, coach: true, coach_ref: "mio".into() }
     }
 }
 
@@ -148,6 +152,9 @@ pub struct Engineer {
     said_ahead_lap: i32,
     endgame_said: bool,
     slow_said: Option<Instant>,
+    // P12 · andamento del passo
+    lap_times: Vec<f32>,
+    pace_said_lap: i32,
 }
 
 impl Engineer {
@@ -226,6 +233,30 @@ impl Engineer {
     fn push_urgent(&mut self, text: String) {
         self.queue.retain(|m| !m.urgent);
         self.queue.push_front(Msg { text, important: true, urgent: true, at: Instant::now() });
+    }
+
+    /// P12: consiglio del coach (dopo un giro pulito, fuori gara)
+    pub fn coach_tip(&mut self, text: String) {
+        self.push(text, false);
+    }
+
+    /// P12 · andamento del passo: ultimi 3 giri buoni contro i tuoi 3 migliori
+    fn pace_lap(&mut self, t: &Tele) {
+        if t.last_lap <= 0.0 || t.on_pit_road {
+            return;
+        }
+        // giri buoni: non più lenti del 5% del migliore (niente box, uscite di pista, traffico pesante)
+        let best = if t.best_lap > 0.0 { t.best_lap } else { t.last_lap };
+        if t.last_lap > best * 1.05 {
+            return;
+        }
+        self.lap_times.push(t.last_lap);
+        if let Some(text) = msg_pace(&self.lap_times) {
+            if self.laps_done - self.pace_said_lap >= 5 {
+                self.pace_said_lap = self.laps_done;
+                self.push(text, false);
+            }
+        }
     }
 
     /// P13 · a fine giro: chi arriva da dietro, chi puoi prendere, quanto basta negli ultimi giri
@@ -314,6 +345,8 @@ impl Engineer {
             said_ahead_lap: -99,
             endgame_said: false,
             slow_said: None,
+            lap_times: Vec::new(),
+            pace_said_lap: -99,
         }
     }
 
@@ -422,6 +455,9 @@ impl Engineer {
                 let d = if t.best_lap > 0.0 { format!(", {} sul migliore", say_delta(t.last_lap - t.best_lap)) } else { String::new() };
                 self.push(format!("{}{}", say_time(t.last_lap), d), false);
             }
+        }
+        if s.coach {
+            self.pace_lap(t);
         }
         if !race {
             return;
@@ -660,6 +696,21 @@ fn say_gap(g: f32) -> String {
     }
 }
 
+// ——— P12 · andamento del passo ———
+
+/// «Passo in calo»: media degli ultimi 3 giri buoni contro la media dei 3 migliori (almeno 6 giri)
+fn msg_pace(laps: &[f32]) -> Option<String> {
+    if laps.len() < 6 {
+        return None;
+    }
+    let last3 = laps[laps.len() - 3..].iter().sum::<f32>() / 3.0;
+    let mut sorted = laps.to_vec();
+    sorted.sort_by(|a, b| a.total_cmp(b));
+    let best3 = sorted[..3].iter().sum::<f32>() / 3.0;
+    let diff = last3 - best3;
+    (diff >= 0.4).then(|| format!("Passo in calo: ultimi 3 giri {} più lenti dei tuoi migliori", say_gap(diff)))
+}
+
 // ——— P13 · stratega ———
 
 /// Quanto si accorcia il distacco a giro (positivo = si avvicinano), dagli ultimi giri (almeno 3 misure)
@@ -730,6 +781,11 @@ mod tests {
         assert_eq!(say_delta(-1.26), "meno 1 e 3");
         assert_eq!(say_gap(0.8), "8 decimi");
         assert_eq!(say_gap(1.24), "1 e 2");
+    }
+    #[test]
+    fn passo() {
+        assert!(msg_pace(&[100.0, 100.1, 100.0, 100.2, 100.1, 100.0]).is_none());
+        assert_eq!(msg_pace(&[100.0, 100.1, 100.0, 100.6, 100.7, 100.5]).unwrap(), "Passo in calo: ultimi 3 giri 6 decimi più lenti dei tuoi migliori");
     }
     #[test]
     fn stratega() {

@@ -4,6 +4,7 @@
 
 mod ascolto;
 mod clips;
+mod coach;
 mod controls;
 mod dash;
 mod engineer;
@@ -241,6 +242,24 @@ fn send_session(app: &AppHandle, body: serde_json::Value) {
     });
 }
 
+/// P12: giro migliore del compagno più veloce (stessa pista e auto) per il coach
+fn fetch_reference(app: &AppHandle, key: String) {
+    let Some(token) = load_config(app).token else { return };
+    let Some((track, car)) = key.split_once('-').map(|(a, b)| (a.to_string(), b.to_string())) else { return };
+    tauri::async_runtime::spawn(async move {
+        let url = format!("{SITE}/api/pitwall/reference?track={track}&car={car}");
+        let Ok(r) = http().get(url).bearer_auth(token).timeout(Duration::from_secs(30)).send().await else { return };
+        if !r.status().is_success() {
+            return;
+        }
+        let Ok(v) = r.json::<serde_json::Value>().await else { return };
+        if let Some(lap) = v.get("data").and_then(coach::Lap::from_json) {
+            let name = v["name"].as_str().unwrap_or("il compagno").split_whitespace().next().unwrap_or("il compagno").to_string();
+            *coach::MATE.lock().unwrap() = Some((key, name, lap));
+        }
+    });
+}
+
 /// Messaggio nel registro di diagnosi del sito (se il PC è abbinato): così si vede cosa succede senza screenshot
 fn site_log(token: Option<String>, message: String) {
     let Some(token) = token else { return };
@@ -318,6 +337,8 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
         let mut moments_sent_at: Option<std::time::Instant> = None;
         // giri di tutte le sessioni per Analisi
         let mut laprec: Option<laprec::LapRec> = None;
+        // P12: pista e auto per cui si è già chiesto il giro del compagno al sito
+        let mut mate_asked = String::new();
         loop {
             if sdk.is_none() {
                 sdk = irsdk::Irsdk::open();
@@ -389,6 +410,15 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         fetch_team(&app, shared.clone());
                         *shared.live_event.lock().unwrap() = None;
                         live_probe(&app, shared.clone(), subsession.parse().unwrap_or(0), session.clone());
+                    }
+                    if let Some(r) = laprec.as_ref() {
+                        if coach::prefer_mate() {
+                            let k = r.ref_key();
+                            if k != mate_asked && !k.starts_with("0-") && !k.ends_with("-0") {
+                                mate_asked = k;
+                                fetch_reference(&app, r.ref_key());
+                            }
+                        }
                     }
                     if let Some(r) = laprec.as_mut() {
                         r.tick(s);
@@ -557,6 +587,13 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         if !text.is_empty() {
                             eng.apply(&settings);
                             eng.say_now(&text);
+                        }
+                    }
+                    // P12: consiglio del coach dopo un tuo giro pulito (fuori gara)
+                    let tip = coach::OUT.lock().unwrap().take();
+                    if let Some(text) = tip {
+                        if settings.coach && settings.enabled {
+                            eng.coach_tip(text);
                         }
                     }
                     // P5: pit wall dal vivo ogni 2 secondi (acceso a mano, o in automatico nelle gare del calendario)
@@ -831,6 +868,7 @@ fn install_voice(app: AppHandle, shared: tauri::State<Arc<Shared>>) {
 #[tauri::command]
 fn set_engineer(app: AppHandle, shared: tauri::State<Arc<Shared>>, settings: engineer::Settings) {
     *shared.engineer.lock().unwrap() = settings.clone();
+    *coach::PREF.lock().unwrap() = settings.coach_ref.clone();
     let mut c = load_config(&app);
     let wants_serena = settings.enabled && matches!(settings.voice.as_deref(), None | Some(voice::SERENA));
     c.engineer = settings;
@@ -1042,6 +1080,7 @@ pub fn run() {
             } else if voice::installed(&voice_dir(app.handle())) {
                 *shared.voice_status.lock().unwrap() = voice::VoiceStatus { state: "pronta".into(), percent: 100, message: "Voce Serena pronta".into() };
             }
+            *coach::PREF.lock().unwrap() = eng_settings.coach_ref.clone();
             *shared.engineer.lock().unwrap() = eng_settings;
             // P6b: cartella dati per l'elenco delle clip e ffmpeg
             if let Ok(d) = app.path().app_local_data_dir() {

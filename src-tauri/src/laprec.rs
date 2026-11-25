@@ -305,9 +305,14 @@ impl LapRec {
                         if me {
                             self.my_extra = None;
                             let samples = self.my_lap_samples.take();
+                            let data = if clean { samples.as_deref().and_then(|sm| reduce(sm, last)) } else { None };
+                            // P12: consiglio del coach (prima di aggiornare il migliore)
+                            if let Some(d) = data.as_ref() {
+                                self.coach(d, last * 1000.0);
+                            }
                             let better = self.best_tel.as_ref().map(|b| last * 1000.0 < b.1).unwrap_or(true);
-                            if clean && better {
-                                if let Some(data) = samples.as_deref().and_then(|sm| reduce(sm, last)) {
+                            if better {
+                                if let Some(data) = data {
                                     self.best_tel = Some((n, last * 1000.0, data));
                                 }
                             }
@@ -315,6 +320,38 @@ impl LapRec {
                     }
                 }
             }
+        }
+    }
+
+    /// P12: pista e auto (numeri iRacing) per il riferimento del compagno, es. «14-160»
+    pub fn ref_key(&self) -> String {
+        format!("{}-{}", self.track_id.unwrap_or(0), self.cars.get(&self.me).and_then(|c| c.iracing_car_id).unwrap_or(0))
+    }
+
+    /// P12: confronta il tuo giro pulito con il riferimento (compagno, se scelto e scaricato, altrimenti il tuo migliore)
+    fn coach(&mut self, data: &serde_json::Value, ms: f64) {
+        if self.session_type == "Race" {
+            return; // in gara il coach sta zitto
+        }
+        let Some(lap) = crate::coach::Lap::from_json(data) else { return };
+        let key = self.ref_key();
+        let mate = if crate::coach::prefer_mate() {
+            crate::coach::MATE.lock().unwrap().clone().filter(|(k, _, _)| *k == key).map(|(_, name, l)| (name, l))
+        } else {
+            None
+        };
+        let (who, reference) = match mate {
+            Some(m) => m,
+            None => match self.best_tel.as_ref() {
+                Some((_, best_ms, d)) if ms > *best_ms => match crate::coach::Lap::from_json(d) {
+                    Some(l) => (String::new(), l),
+                    None => return,
+                },
+                _ => return, // primo giro o nuovo migliore: niente da correggere
+            },
+        };
+        if let Some(text) = crate::coach::advice(&lap, &reference, &who) {
+            *crate::coach::OUT.lock().unwrap() = Some(text);
         }
     }
 

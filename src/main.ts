@@ -75,10 +75,10 @@ async function loadMoments() {
   }
 }
 
-type EngSettings = { enabled: boolean; voice: string | null; volume: number; fuel: boolean; laptime: boolean; gaps: boolean; flags: boolean; race: boolean; strategy: boolean };
+type EngSettings = { enabled: boolean; voice: string | null; volume: number; fuel: boolean; laptime: boolean; gaps: boolean; flags: boolean; race: boolean; strategy: boolean; coach: boolean; coachRef: string };
 type VoiceStatus = { state: string; percent: number; message: string };
 type EngState = { settings: EngSettings; voices: { id: string; name: string }[]; voiceStatus: VoiceStatus };
-const FLAGS = ["enabled", "laptime", "fuel", "gaps", "flags", "race", "strategy"] as const;
+const FLAGS = ["enabled", "laptime", "fuel", "gaps", "flags", "race", "strategy", "coach"] as const;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const num = (x: number, d = 1) => x.toFixed(d).replace(".", ",");
@@ -202,11 +202,13 @@ window.addEventListener("DOMContentLoaded", async () => {
   $("v-install").addEventListener("click", () => invoke("install_voice"));
   $<HTMLInputElement>("e-volume").value = String(eng.settings.volume);
   for (const k of FLAGS) $<HTMLInputElement>(`e-${k}`).checked = eng.settings[k];
+  $<HTMLSelectElement>("e-coach-ref").value = eng.settings.coachRef || "mio";
   const saveEng = () => {
     const settings: EngSettings = {
       ...eng.settings,
       voice: sel.value || null,
       volume: Number($<HTMLInputElement>("e-volume").value),
+      coachRef: $<HTMLSelectElement>("e-coach-ref").value,
     };
     for (const k of FLAGS) settings[k] = $<HTMLInputElement>(`e-${k}`).checked;
     eng.settings = settings;
