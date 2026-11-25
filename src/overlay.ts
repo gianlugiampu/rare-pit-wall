@@ -483,6 +483,8 @@ function buildCurve(it: Item): View {
   const o = (k: string) => opt(it, "curve", k);
   const el = document.createElement("div");
   el.className = "panel curve tab";
+  const body = document.createElement("div");
+  el.append(body);
   return {
     el,
     update(f) {
@@ -499,9 +501,10 @@ function buildCurve(it: Item): View {
         })
         .join("");
       const html = `<div class="cv-hd"><span class="d">CURVE</span><span>${ref}${tot}</span></div><div class="cv-row" style="grid-template-columns:repeat(${c.loss.length},1fr)">${cells}</div>`;
-      if (html !== el.dataset.html) {
-        el.dataset.html = html;
-        el.innerHTML = html;
+      // si riscrive solo il contenuto: la maniglia per spostare l'overlay («sposta») deve restare
+      if (html !== body.dataset.html) {
+        body.dataset.html = html;
+        body.innerHTML = html;
       }
     },
   };
@@ -621,6 +624,8 @@ function buildStratega(it: Item): View {
   const o = (k: string) => opt(it, "stratega", k);
   const el = document.createElement("div");
   el.className = "panel stratega tab";
+  const body = document.createElement("div");
+  el.append(body);
   const row = (c: StratCar, isAhead: boolean, cars: Car[] | null, lapsRemain: number | null) => {
     if (c.idx < 0 || c.gap == null) return "";
     const d = driverOf(c.idx);
@@ -668,9 +673,10 @@ function buildStratega(it: Item): View {
           html += `<div class="st-goal"><span class="muted">Compagno <b>#${esc(d?.number ?? "")} ${esc(d?.name ?? "")}</b> P${mate.pos}</span><span>${gap > 0 ? "+" : "-"}${g1(Math.abs(gap))}</span></div>`;
         }
       }
-      if (html !== el.dataset.html) {
-        el.dataset.html = html;
-        el.innerHTML = html;
+      // si riscrive solo il contenuto: la maniglia per spostare l'overlay («sposta») deve restare
+      if (html !== body.dataset.html) {
+        body.dataset.html = html;
+        body.innerHTML = html;
       }
     },
   };
