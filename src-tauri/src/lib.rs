@@ -2,6 +2,7 @@
 //! P1 (base): legge iRacing, mostra lo stato nella finestrella e nell'icona vicino all'orologio,
 //! si abbina all'account del pilota con un codice preso dal Profilo dell'area piloti.
 
+mod ascolto;
 mod clips;
 mod controls;
 mod dash;
@@ -28,6 +29,9 @@ use tauri::{
 pub static ASK: Mutex<Option<String>> = Mutex::new(None);
 /// Frase da dire subito (es. «Delta sul migliore della sessione» dopo il comando rapido)
 static SAY_TEXT: Mutex<Option<String>> = Mutex::new(None);
+/// P9: il programma, per chi deve eseguire un comando da un altro thread (comandi a voce)
+pub static APP: std::sync::OnceLock<AppHandle> = std::sync::OnceLock::new();
+
 pub fn say_text(t: &str) {
     *SAY_TEXT.lock().unwrap() = Some(t.to_string());
 }
@@ -50,6 +54,9 @@ struct Config {
     /// P5: accensione automatica del pit wall nelle gare del calendario (salvato «spento», così di base è acceso)
     #[serde(default)]
     pitwall_auto_off: bool,
+    /// P9: microfono per i comandi a voce (vuoto = quello di Windows)
+    #[serde(default)]
+    mic: String,
 }
 
 /// Toglie l'abbinamento ma tiene le impostazioni (voce, volume…)
@@ -786,6 +793,25 @@ fn set_engineer(app: AppHandle, shared: tauri::State<Arc<Shared>>, settings: eng
     }
 }
 
+// ——— P9 · comandi a voce ———
+#[tauri::command]
+fn listen_state() -> ascolto::ListenState {
+    ascolto::state()
+}
+
+#[tauri::command]
+async fn listen_install() -> Result<(), String> {
+    ascolto::install().await
+}
+
+#[tauri::command]
+fn listen_set_mic(app: AppHandle, mic: String) {
+    let mut c = load_config(&app);
+    c.mic = mic.clone();
+    save_config(&app, &c);
+    ascolto::set_mic(mic);
+}
+
 #[tauri::command]
 fn test_voice(shared: tauri::State<Arc<Shared>>) {
     *shared.say.lock().unwrap() = Some("Ciao, sono il tuo ingegnere. 3 giri di benzina. Davanti a 1 e 2, recuperi 3 decimi.".into());
@@ -914,6 +940,7 @@ pub fn run() {
         .manage(shared.clone())
         .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto, get_moments, jump_to_moment, export_clips, clip_status, cancel_clips, open_videos, clip_files, send_clip,
             overlay::overlay_state, overlay::overlay_save, overlay::overlay_edit, overlay::overlay_reset, overlay::overlay_open_settings, overlay::overlay_hello, overlay::overlay_drivers, overlay::overlay_map, overlay::overlay_map_dir,
+            listen_state, listen_install, listen_set_mic,
             controls::controls_state, controls::controls_assign_button, controls::controls_set_key, controls::controls_clear_button, controls::controls_test])
         .setup(move |app| {
             // Parte con Windows (si può togliere da Impostazioni → App → Avvio)
@@ -957,6 +984,9 @@ pub fn run() {
                     let _ = w.hide();
                 }
             }
+            let _ = APP.set(app.handle().clone());
+            // P9: comandi a voce (Vosk, scaricato la prima volta nella cartella della voce)
+            ascolto::init(voice_dir(app.handle()), load_config(app.handle()).mic);
             // P4: impostazioni dell'ingegnere salvate sul PC
             let eng_settings = load_config(app.handle()).engineer;
             // voce Serena: si scarica da sola la prima volta (se l'ingegnere è acceso e Serena è la voce scelta)
@@ -985,7 +1015,9 @@ pub fn run() {
                 app.handle().plugin(
                     tauri_plugin_global_shortcut::Builder::new()
                         .with_handler(move |app, sc, ev| {
-                            if ev.state() == ShortcutState::Pressed {
+                            if ev.state() == ShortcutState::Released {
+                                controls::on_shortcut_released(app, sc);
+                            } else if ev.state() == ShortcutState::Pressed {
                                 if *sc == toggle {
                                     overlay::toggle_hidden(app);
                                 } else if *sc == edit {

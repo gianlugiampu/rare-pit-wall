@@ -117,6 +117,7 @@ body:has(#main:not([hidden])) { display: flex; flex-direction: column; overflow:
 .kbd { display: inline-block; padding: 0 7px; border: 1px solid var(--ink600); border-radius: 5px; font-size: 11px; color: var(--p300); }
 .soonbox { margin-top: 12px; padding: 12px 14px; border: 1px dashed var(--ink600); border-radius: 8px; }
 .soonbox .k { color: var(--ink400); }
+.tag.live { background: var(--live); }
 .tag { font-size: 10px; text-transform: uppercase; letter-spacing: .1em; padding: 1px 6px; border-radius: 4px; background: var(--ink600); color: #fff; margin-left: 6px; }
 .pane .dash { margin-top: 8px; border: 0; padding: 0; background: none; }
 .pane .live-box { margin-top: 12px; }

@@ -217,6 +217,33 @@ window.addEventListener("DOMContentLoaded", async () => {
     await saveEng();
     await invoke("test_voice");
   });
+  // P9 · comandi a voce (Vosk): stato, scaricamento, microfono, ultima frase sentita
+  type Listen = { install: VoiceStatus; listening: boolean; last: string; mics: string[]; mic: string };
+  const mic = $<HTMLSelectElement>("vc-mic");
+  let micsKey = "";
+  const showListen = async () => {
+    const l = await invoke<Listen>("listen_state");
+    const i = l.install;
+    $("vc-status").textContent = i.state === "scarico" ? `${i.message} ${i.percent}%` : i.state === "pronta" ? "✓ Comandi a voce pronti" : i.state === "errore" ? i.message : "Da scaricare una volta sola (gratis): motore Vosk e italiano.";
+    $("vc-install").hidden = i.state === "pronta" || i.state === "scarico";
+    $("vc-on").hidden = !l.listening;
+    $("vc-last").textContent = l.last ? `Ultima frase: ${l.last}` : "";
+    const key = l.mics.join("|");
+    if (key !== micsKey) {
+      micsKey = key;
+      mic.innerHTML = "";
+      mic.add(new Option("Quello di Windows", ""));
+      for (const m of l.mics) mic.add(new Option(m, m));
+    }
+    if (document.activeElement !== mic) mic.value = l.mic;
+  };
+  showListen();
+  setInterval(showListen, 1000);
+  $("vc-install").addEventListener("click", () => {
+    invoke("listen_install").catch(() => {});
+    setTimeout(showListen, 300);
+  });
+  mic.addEventListener("change", () => invoke("listen_set_mic", { mic: mic.value }));
   // P6b · clip video dei momenti scelti
   const picks = () => [...document.querySelectorAll<HTMLInputElement>(".clip-pick")];
   $("clip-all").addEventListener("click", (e) => { e.preventDefault(); picks().forEach((c) => (c.checked = true)); });

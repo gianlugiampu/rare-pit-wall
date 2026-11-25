@@ -18,6 +18,7 @@ pub const ACTIONS: &[(&str, &str)] = &[
     ("posizione", "Chiedi: posizione e giri"),
     ("tempi", "Chiedi: tempi"),
     ("delta", "Cambia il riferimento del delta"),
+    ("parla", "Tieni premuto e parla (comandi a voce)"),
 ];
 
 #[derive(Serialize, Deserialize, Clone, Default)]
@@ -91,10 +92,19 @@ pub fn on_shortcut(app: &AppHandle, sc: &tauri_plugin_global_shortcut::Shortcut)
     }
 }
 
+/// Tasto della tastiera lasciato: se è quello per parlare, si smette di ascoltare
+pub fn on_shortcut_released(_app: &AppHandle, sc: &tauri_plugin_global_shortcut::Shortcut) {
+    let action = STATE.lock().unwrap().keys.iter().find(|(k, _)| k == sc).map(|(_, a)| a.clone());
+    if action.as_deref() == Some("parla") {
+        crate::ascolto::stop();
+    }
+}
+
 /// Esegue un'azione
 pub fn run(app: &AppHandle, action: &str) {
     match action {
         "delta" => crate::overlay::cycle_delta(app),
+        "parla" => crate::ascolto::start(),
         other => *crate::ASK.lock().unwrap() = Some(other.to_string()),
     }
 }
@@ -162,6 +172,16 @@ fn start_joystick(app: AppHandle) {
                 let Some(now) = joy::buttons(id) else { continue };
                 let before = last.insert(id, now).unwrap_or(now);
                 let pressed = now & !before;
+                // tasto per parlare lasciato: si smette di ascoltare
+                let released = before & !now;
+                if released != 0 {
+                    let st = STATE.lock().unwrap();
+                    if let Some(b) = st.bindings.get("parla").filter(|b| b.device.as_deref() == Some(name.as_str())) {
+                        if b.button.is_some_and(|n| released & (1 << (n - 1)) != 0) {
+                            crate::ascolto::stop();
+                        }
+                    }
+                }
                 if pressed == 0 {
                     continue;
                 }
@@ -260,4 +280,11 @@ pub fn controls_clear_button(app: AppHandle, action: String) {
 #[tauri::command]
 pub fn controls_test(app: AppHandle, action: String) {
     run(&app, &action);
+    // prova del tasto per parlare dalla finestra: ascolta 3 secondi
+    if action == "parla" {
+        std::thread::spawn(|| {
+            std::thread::sleep(Duration::from_secs(3));
+            crate::ascolto::stop();
+        });
+    }
 }

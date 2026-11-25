@@ -155,9 +155,16 @@
             <ul id="ctl" class="obs-list ctl-list"></ul>
             <p id="ctl-dev" class="small"></p>
           </section>
-          <div class="soonbox">
-            <p class="k">Comandi a voce <span class="tag">in arrivo</span></p>
-            <p class="small">Tieni premuto un tasto del volante, fai la domanda, lascia il tasto: «quanta benzina ho?», «chi ho dietro?». Funzionerà senza internet.</p>
+          <div id="vc" class="box">
+            <p class="k">Comandi a voce <span id="vc-on" class="tag live" hidden>ti ascolto</span></p>
+            <p class="small">Tieni premuto il tasto per parlare, fai la domanda, lascia il tasto: Serena risponde. Funziona senza internet.
+              Il tasto si assegna qui sopra, alla voce <b>«Tieni premuto e parla»</b>.</p>
+            <p id="vc-status" class="small"></p>
+            <button type="button" id="vc-install" class="ghost" hidden>Scarica i comandi a voce (65 MB, una volta sola)</button>
+            <label class="field">Microfono <select id="vc-mic"></select></label>
+            <p class="small">Cosa puoi dire: «quanta benzina ho», «quando mi fermo», «chi ho davanti», «chi ho dietro», «in che posizione sono»,
+              «quanti giri mancano», «ultimo giro», «giro migliore», «come vado», «cambia delta».</p>
+            <p id="vc-last" class="small"></p>
           </div>
         </section>
 
