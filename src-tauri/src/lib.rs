@@ -640,6 +640,16 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                             engineer::Rejoin { pos, ahead, behind, loss, learned }
                         }),
                         faster_behind,
+                        tank_l: irsdk::yaml_value(&cur_yaml, "DriverCarFuelMaxLtr", None).and_then(|v| v.parse::<f32>().ok()).map(|m| m * irsdk::yaml_value(&cur_yaml, "DriverCarMaxFuelPct", None).and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0)).filter(|t| *t > 0.0),
+                        ahead_num: if ahead_idx >= 0 { overlay::car_brief(ahead_idx as usize).map(|c| c.0).unwrap_or_default() } else { String::new() },
+                        behind_num: if behind_idx >= 0 { overlay::car_brief(behind_idx as usize).map(|c| c.0).unwrap_or_default() } else { String::new() },
+                        ahead_pace: if ahead_idx >= 0 { pit_learn.pace(ahead_idx as usize) } else { None },
+                        behind_pace: if behind_idx >= 0 { pit_learn.pace(behind_idx as usize) } else { None },
+                        ahead_stops: if ahead_idx >= 0 && session == "Race" { pit_learn.stops(ahead_idx as usize) } else { None },
+                        behind_stops: if behind_idx >= 0 && session == "Race" { pit_learn.stops(behind_idx as usize) } else { None },
+                        my_stops: if me >= 0 && session == "Race" { pit_learn.stops(me as usize) } else { None },
+                        wetness: s.get("TrackWetness").map(|v| v.as_i32()).unwrap_or(0),
+                        declared_wet: s.get("WeatherDeclaredWet").map(|v| v.as_bool()).unwrap_or(false),
                     };
                     let settings = shared.engineer.lock().unwrap().clone();
                     eng.update(&tele, &settings);

@@ -67,6 +67,12 @@ pub const FRASI: &[(&str, &str)] = &[
     ("silenzio", "silenzio"),
     ("parla di meno", "silenzio"),
     ("parla di più", "voce"),
+    // Stratega avanzato
+    ("passo", "passo"),
+    ("passo degli avversari", "passo"),
+    ("come vanno gli altri", "passo"),
+    ("soste", "soste"),
+    ("quante soste", "soste"),
 ];
 
 /// Stato mostrato nella scheda Voce

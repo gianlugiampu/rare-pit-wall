@@ -86,6 +86,19 @@ pub struct Tele {
     pub rejoin: Option<Rejoin>,
     /// P13: auto di una classe più veloce dietro di te in pista (secondi)
     pub faster_behind: Option<f32>,
+    /// E4: serbatoio pieno (litri)
+    pub tank_l: Option<f32>,
+    /// E9/F33: numero, passo (ultimi 3 giri), calo sui suoi migliori e soste di chi è davanti e dietro; le tue soste
+    pub ahead_num: String,
+    pub behind_num: String,
+    pub ahead_pace: Option<(f32, Option<f32>)>,
+    pub behind_pace: Option<(f32, Option<f32>)>,
+    pub ahead_stops: Option<i32>,
+    pub behind_stops: Option<i32>,
+    pub my_stops: Option<i32>,
+    /// E10: pista bagnata (0 = non si sa, 1 asciutta … 7 molto bagnata), dichiarata bagnata, temperatura per il trend
+    pub wetness: i32,
+    pub declared_wet: bool,
 }
 
 /// P13 · rientro dopo una sosta fatta adesso
@@ -193,6 +206,15 @@ pub struct Engineer {
     pace_said_lap: i32,
     // P13 · auto più veloci in arrivo
     faster_said: Option<Instant>,
+    // E9 · ultimo avviso sul passo per auto (numero → giro)
+    pace_said: Vec<(String, i32)>,
+    // E4 · giro del box già detto
+    box_said_lap: i32,
+    // E10 · meteo: bagnato e temperature (ora, gradi)
+    wet_said: i32,
+    declared_said: bool,
+    temps: Vec<(Instant, f32)>,
+    temp_said: Option<Instant>,
 }
 
 impl Engineer {
@@ -298,8 +320,8 @@ impl Engineer {
             "pos": t.position,
             "lapsRemain": t.laps_remain,
             "lastLap": t.last_lap,
-            "ahead": { "idx": t.ahead_idx, "gap": t.gap_ahead, "hist": self.hist_ahead, "rate": rate_a, "laps": catch(t.gap_ahead, rate_a, 0.5) },
-            "behind": { "idx": t.behind_idx, "gap": t.gap_behind, "hist": self.hist_behind, "rate": rate_b, "laps": catch(t.gap_behind, rate_b, 0.3) },
+            "ahead": { "idx": t.ahead_idx, "gap": t.gap_ahead, "hist": self.hist_ahead, "rate": rate_a, "laps": catch(t.gap_ahead, rate_a, 0.5), "stops": t.ahead_stops },
+            "behind": { "idx": t.behind_idx, "gap": t.gap_behind, "hist": self.hist_behind, "rate": rate_b, "laps": catch(t.gap_behind, rate_b, 0.3), "stops": t.behind_stops },
             "goal": goal,
             "slow": t.slow_ahead_m.filter(|_| t.on_track && t.speed_kmh > 60.0),
         })
@@ -365,6 +387,47 @@ impl Engineer {
                 }
             }
         }
+        // E9 · chi davanti o dietro sta calando (almeno mezzo secondo più lento dei suoi migliori), una volta ogni 6 giri per auto
+        for (num, pace, where_) in [(&t.ahead_num, t.ahead_pace, "davanti"), (&t.behind_num, t.behind_pace, "dietro")] {
+            let Some((_, Some(drop))) = pace else { continue };
+            if drop < 0.5 || num.is_empty() {
+                continue;
+            }
+            let recent = self.pace_said.iter().any(|(n, l)| n == num && self.laps_done - l < 6);
+            if !recent {
+                self.pace_said.retain(|(n, _)| n != num);
+                self.pace_said.push((num.clone(), self.laps_done));
+                self.push(format!("Il {num} {where_} sta calando: {} più lento dei suoi giri migliori", say_gap(drop)), false);
+            }
+        }
+        // E4 · finestra per la sosta: a ogni giro dentro la finestra, se rientri in aria libera o nel traffico
+        if let (Some(per), Some(tank)) = (t.fuel_per_lap, t.tank_l) {
+            let remain = t.laps_remain.map(|r| r as f32).or_else(|| match (t.time_remain, t.best_lap > 0.0) {
+                (Some(sec), true) => Some((sec as f32 / t.best_lap).ceil() + 1.0),
+                _ => None,
+            });
+            let lap = t.lap_completed + 1;
+            if let Some((first, last)) = remain.and_then(|r| strategia_window(lap, r, t.fuel_l, per, tank)) {
+                if lap >= first && lap <= last && self.box_said_lap != lap {
+                    self.box_said_lap = lap;
+                    let clear = t.rejoin.as_ref().map(|r| r.ahead.as_ref().map_or(true, |a| a.1 >= 2.0) && r.behind.as_ref().map_or(true, |b| b.1 >= 1.5));
+                    let text = if lap == last {
+                        "Ultimo giro utile per il box".to_string()
+                    } else if lap == first {
+                        format!("Si apre la finestra box: puoi fermarti fino al giro {last}")
+                    } else {
+                        match (clear, t.rejoin.as_ref()) {
+                            (Some(true), Some(r)) => format!("Box: questo giro è buono, rientri P{} in aria libera", r.pos),
+                            (Some(false), Some(r)) => format!("Box: se ti fermi ora rientri P{} nel traffico, meglio aspettare", r.pos),
+                            _ => String::new(),
+                        }
+                    };
+                    if !text.is_empty() {
+                        self.push(text, lap == last);
+                    }
+                }
+            }
+        }
         if !self.endgame_said {
             if let (Some(rem), Some(gap)) = (t.laps_remain, t.gap_behind) {
                 if (1..=3).contains(&rem) && t.last_lap > 0.0 {
@@ -418,6 +481,12 @@ impl Engineer {
             lap_times: Vec::new(),
             pace_said_lap: -99,
             faster_said: None,
+            pace_said: Vec::new(),
+            box_said_lap: -1,
+            wet_said: 0,
+            declared_said: false,
+            temps: Vec::new(),
+            temp_said: None,
         }
     }
 
@@ -491,6 +560,40 @@ impl Engineer {
                 self.fuel_said_at = 99;
             }
             self.prev_fuel = t.fuel_l;
+        }
+
+        // ——— E10 · meteo che cambia (in tutte le sessioni, con lo Stratega acceso) ———
+        if s.strategy && t.on_track {
+            if t.declared_wet && !self.declared_said {
+                self.declared_said = true;
+                self.push("Pista dichiarata bagnata: si possono montare le gomme da pioggia".into(), true);
+            }
+            if t.wetness > 0 {
+                if self.wet_said == 0 {
+                    self.wet_said = t.wetness;
+                } else if t.wetness >= self.wet_said + 2 {
+                    self.wet_said = t.wetness;
+                    self.push("La pista si sta bagnando".into(), true);
+                } else if t.wetness + 2 <= self.wet_said {
+                    self.wet_said = t.wetness;
+                    self.push("La pista si sta asciugando".into(), false);
+                }
+            }
+            if let Some(tt) = t.track_temp {
+                let now = Instant::now();
+                if self.temps.last().map_or(true, |(at, _)| at.elapsed() > Duration::from_secs(60)) {
+                    self.temps.push((now, tt));
+                    self.temps.retain(|(at, _)| at.elapsed() < Duration::from_secs(25 * 60));
+                }
+                if let Some((at, old)) = self.temps.first().copied() {
+                    let d = tt - old;
+                    if at.elapsed() > Duration::from_secs(10 * 60) && d.abs() >= 3.0 && self.temp_said.map_or(true, |x| x.elapsed() > Duration::from_secs(15 * 60)) {
+                        self.temp_said = Some(now);
+                        let mins = (at.elapsed().as_secs() / 60) as i32;
+                        self.push(format!("Pista {} di {} gradi negli ultimi {mins} minuti", if d > 0.0 { "più calda" } else { "più fresca" }, d.abs().round() as i32), false);
+                    }
+                }
+            }
         }
 
         // ——— Bandiere (solo quelle che lo spotter non dice) ———
@@ -773,6 +876,35 @@ pub fn answer(t: &Tele, what: &str) -> String {
             }
             _ => "Nessun compagno in questa sessione".into(),
         },
+        // E9 · passo di chi è davanti e dietro, e il tuo
+        "passo" => {
+            let mut parts = vec![];
+            if let Some((p, _)) = t.ahead_pace {
+                parts.push(format!("davanti il {} gira in {}", t.ahead_num, say_time(p)));
+            }
+            if let Some((p, _)) = t.behind_pace {
+                parts.push(format!("dietro il {} in {}", t.behind_num, say_time(p)));
+            }
+            if parts.is_empty() {
+                "Il passo degli altri lo so dopo qualche giro".into()
+            } else {
+                capitalize(&parts.join(", "))
+            }
+        }
+        // F33 · soste fatte
+        "soste" => match t.my_stops {
+            Some(me) => {
+                let mut s = format!("Hai fatto {me} sost{}", if me == 1 { "a" } else { "e" });
+                if let Some(a) = t.ahead_stops {
+                    s += &format!(", il {} davanti {a}", t.ahead_num);
+                }
+                if let Some(b) = t.behind_stops {
+                    s += &format!(", il {} dietro {b}", t.behind_num);
+                }
+                s
+            }
+            None => "Le soste le conto in gara".into(),
+        },
         // V2 · temperature
         "meteo" => match (t.track_temp, t.air_temp) {
             (Some(tr), Some(a)) => format!("Pista {} gradi, aria {}", tr.round() as i32, a.round() as i32),
@@ -815,6 +947,11 @@ fn say_gap(g: f32) -> String {
     } else {
         format!("{} e {}", tenths / 10, tenths % 10)
     }
+}
+
+/// E4 · finestra della sosta (calcolo in strategia.rs)
+fn strategia_window(lap: i32, remain: f32, fuel: f32, per: f32, tank: f32) -> Option<(i32, i32)> {
+    crate::strategia::pit_window(lap, remain, fuel, per, tank)
 }
 
 // ——— P12 · andamento del passo ———
@@ -914,6 +1051,12 @@ mod tests {
         assert_eq!(answer(&t, "compagno"), "Il compagno, il 22, è P8, dietro a 2 e 4");
         assert_eq!(answer(&t, "meteo"), "Pista 31 gradi, aria 22");
         assert_eq!(answer(&t, "box"), "Se ti fermi ora rientri P9, dietro al 33 di 2 secondi, davanti al 4 di 1 e 5. Stima con 25 secondi di sosta");
+    }
+    #[test]
+    fn risposte_stratega() {
+        let t = Tele { ahead_num: "7".into(), behind_num: "12".into(), ahead_pace: Some((106.2, None)), behind_pace: Some((105.8, Some(0.2))), my_stops: Some(0), ahead_stops: Some(1), behind_stops: Some(0), ..Default::default() };
+        assert_eq!(answer(&t, "passo"), "Davanti il 7 gira in 1 minuto 46 e 2, dietro il 12 in 1 minuto 45 e 8");
+        assert_eq!(answer(&t, "soste"), "Hai fatto 0 soste, il 7 davanti 1, il 12 dietro 0");
     }
     #[test]
     fn passo() {

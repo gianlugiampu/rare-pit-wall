@@ -607,7 +607,7 @@ function buildBandiere(it: Item): View {
 }
 
 // ——— Stratega (P13, bozza v1 approvata): dati dall'ingegnere una volta al secondo ———
-type StratCar = { idx: number; gap: number | null; hist: number[]; rate: number | null; laps: number | null };
+type StratCar = { idx: number; gap: number | null; hist: number[]; rate: number | null; laps: number | null; stops?: number | null };
 type Strat = { race: boolean; pos: number; lapsRemain: number | null; lastLap: number; ahead: StratCar; behind: StratCar; goal: number | null; slow: number | null };
 let strat: Strat | null = null;
 const demoStrat: Strat = {
@@ -624,7 +624,7 @@ function buildStratega(it: Item): View {
   const row = (c: StratCar, isAhead: boolean, cars: Car[] | null, lapsRemain: number | null) => {
     if (c.idx < 0 || c.gap == null) return "";
     const d = driverOf(c.idx);
-    const who = `<b>#${esc(d?.number ?? "")}</b>${o("names") ? esc(d?.name ?? "") : ""}`;
+    const who = `<b>#${esc(d?.number ?? "")}</b>${o("names") ? esc(d?.name ?? "") : ""}${c.stops ? ` <span class="muted">· ${c.stops} sost${c.stops === 1 ? "a" : "e"}</span>` : ""}`;
     let sub = `<span class="muted">distacco stabile</span><span></span>`;
     const r = c.rate;
     if (r != null && Math.abs(r) >= 0.05) {
