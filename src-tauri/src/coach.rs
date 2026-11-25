@@ -53,6 +53,41 @@ pub fn mate_delta(pct: f32, lap_cur: f32) -> Option<(f32, f32, String)> {
 /// V3 · ultimo consiglio dato (per «dove perdo tempo?»)
 pub static LAST: Mutex<Option<String>> = Mutex::new(None);
 
+/// F15 · replay commentato: i tuoi giri puliti della sessione (chiave della sessione, giro → (tempo, telemetria))
+pub static MY_LAPS: Mutex<(String, std::collections::BTreeMap<i32, (f64, Lap)>)> = Mutex::new((String::new(), std::collections::BTreeMap::new()));
+/// F15 · commento del replay acceso
+pub static COMMENT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// F15 · le frasi di un giro rispetto al riferimento: (fine della curva in frazione di giro, frase), solo dove si perde o
+/// si guadagna almeno 5 centesimi
+pub fn corner_lines(a: &Lap, b: &Lap) -> Vec<(f64, String)> {
+    if a.n != b.n || a.n < 50 || b.len_m <= 0.0 {
+        return vec![];
+    }
+    let n = a.n;
+    let step = b.len_m / (n - 1) as f64;
+    let up = |m: f64| (m / step).ceil() as usize;
+    let mut out = vec![];
+    for (idx, z) in corners(b, step).iter().enumerate() {
+        let loss = a.t[z.e] - a.t[z.s] - (b.t[z.e] - b.t[z.s]);
+        if loss.abs() < 0.05 {
+            continue;
+        }
+        let look = z.s.saturating_sub(up(80.0));
+        let brk = |l: &Lap| first(look, z.apex + 1, |k| l.brk[k] >= BRAKE_ON);
+        let why = match (brk(a), brk(b)) {
+            (Some(x), Some(y)) => {
+                let m = ((x as f64 - y as f64) * step).round() as i64;
+                if m.abs() >= 5 { format!(", freni {} metri {}", m.abs(), if m > 0 { "dopo" } else { "prima" }) } else { String::new() }
+            }
+            _ => String::new(),
+        };
+        let what = if loss > 0.0 { format!("perdi {}", tenths(loss)) } else { format!("guadagni {}", tenths(loss)) };
+        out.push((z.e as f64 / (n - 1) as f64, format!("Curva {}: {what}{why}", idx + 1)));
+    }
+    out
+}
+
 /// F14 · tratto dello stile da migliorare del pilota (dal sito): "brake", "corner", "trail", "gas" o vuoto
 pub static STYLE: Mutex<String> = Mutex::new(String::new());
 
@@ -525,6 +560,16 @@ mod tests {
             l.gear.push(if spd < 100.0 { 2.0 } else { 5.0 });
         }
         l
+    }
+
+    #[test]
+    fn commento() {
+        let rif = lap(200, 0.0);
+        let mio = lap(195, 8.0);
+        let l = corner_lines(&mio, &rif);
+        assert_eq!(l.len(), 1);
+        assert!(l[0].1.starts_with("Curva 1: perdi") && l[0].1.contains("freni 50 metri prima"), "{}", l[0].1);
+        assert!(corner_lines(&rif, &rif).is_empty());
     }
 
     #[test]

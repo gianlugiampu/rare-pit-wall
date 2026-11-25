@@ -253,6 +253,8 @@ window.addEventListener("DOMContentLoaded", async () => {
     setTimeout(showListen, 300);
   });
   mic.addEventListener("change", () => invoke("listen_set_mic", { mic: mic.value }));
+  // F15 · commento del replay
+  $("rp-comment").addEventListener("change", (e) => invoke("set_commentary", { on: (e.target as HTMLInputElement).checked }));
   // F8 · highlight 9:16
   const hlMode = $<HTMLSelectElement>("hl-mode");
   try {

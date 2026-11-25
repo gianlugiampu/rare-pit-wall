@@ -249,6 +249,23 @@ fn send_session(app: &AppHandle, body: serde_json::Value) {
     });
 }
 
+/// F15 · «1:46,2, 3 decimi dal migliore»
+fn lap_words(secs: f64, best: f64) -> String {
+    let t = (secs * 10.0).round() as i64;
+    let base = format!("{} minut{} {} e {}", t / 600, if t / 600 == 1 { "o" } else { "i" }, (t % 600) / 10, t % 10);
+    let d = ((secs - best) * 10.0).round() as i64;
+    if best < f64::MAX && d > 0 {
+        format!("{base}, {} dal migliore", if d < 10 { format!("{d} decim{}", if d == 1 { "o" } else { "i" }) } else { format!("{} e {}", d / 10, d % 10) })
+    } else {
+        base
+    }
+}
+
+#[tauri::command]
+fn set_commentary(on: bool) {
+    coach::COMMENT.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// P12: giro migliore del compagno più veloce (stessa pista e auto) per il coach
 fn fetch_reference(app: &AppHandle, key: String) {
     let Some(token) = load_config(app).token else { return };
@@ -352,6 +369,8 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
         let mut pit_learn = strategia::PitLearn::default();
         // F1: battaglia con la stessa auto
         let mut battle = strategia::Battle::default();
+        // F15: replay commentato (giro che si sta guardando, frasi, prossima frase, ultimo punto del giro)
+        let mut comment: (i32, Vec<(f64, String)>, usize, f64) = (-1, vec![], 0, 0.0);
         let mut pct_hist: std::collections::VecDeque<Vec<f32>> = Default::default();
         let (mut subsession, mut session_num, mut official) = (String::new(), 0, false);
         let mut sent: std::collections::HashSet<String> = Default::default();
@@ -800,6 +819,38 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                     if session == "Race" {
                         detector.update(s);
                         pit_learn.update(s);
+                    }
+                    // F15 · replay commentato: con il replay di iRacing che va e la tua auto inquadrata
+                    if coach::COMMENT.load(std::sync::atomic::Ordering::Relaxed) && me >= 0 {
+                        let playing = s.get("IsReplayPlaying").map(|v| v.as_bool()).unwrap_or(false);
+                        let cam = s.get("CamCarIdx").map(|v| v.as_i32()).unwrap_or(-1);
+                        if playing && cam == me {
+                            let lap = s.get_at("CarIdxLap", me as usize).map(|v| v.as_i32()).unwrap_or(-1);
+                            let pct = s.get_at("CarIdxLapDistPct", me as usize).map(|v| v.as_f64()).unwrap_or(-1.0);
+                            if lap != comment.0 && lap > 0 {
+                                let laps = coach::MY_LAPS.lock().unwrap().1.clone();
+                                let best = laps.values().map(|x| x.0).fold(f64::MAX, f64::min);
+                                let plan = coach::current_plan();
+                                comment = (lap, vec![], 0, pct);
+                                match (laps.get(&lap), plan) {
+                                    (Some((secs, l)), Some(p)) => {
+                                        let same = (p.lap.t.last().copied().unwrap_or(0.0) - secs).abs() < 0.001;
+                                        let head = if same { format!("Giro {lap}: il tuo migliore") } else { format!("Giro {lap}: {}", lap_words(*secs, best)) };
+                                        say_text(&head);
+                                        if !same {
+                                            comment.1 = coach::corner_lines(l, &p.lap);
+                                        }
+                                    }
+                                    _ => {}
+                                }
+                            }
+                            // all'uscita di ogni curva, la sua frase
+                            while comment.2 < comment.1.len() && pct >= comment.1[comment.2].0 && comment.3 < comment.1[comment.2].0 {
+                                say_text(&comment.1[comment.2].1.clone());
+                                comment.2 += 1;
+                            }
+                            comment.3 = pct;
+                        }
                     }
                     // V3 · «segna questo momento»
                     if MARK.swap(false, std::sync::atomic::Ordering::Relaxed) {
@@ -1296,7 +1347,7 @@ pub fn run() {
         .manage(shared.clone())
         .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto, get_moments, jump_to_moment, export_clips, clip_status, cancel_clips, open_videos, clip_files, send_clip, make_highlight,
             overlay::overlay_state, overlay::overlay_save, overlay::overlay_edit, overlay::overlay_reset, overlay::overlay_open_settings, overlay::overlay_hello, overlay::overlay_drivers, overlay::overlay_map, overlay::overlay_map_dir, overlay::overlay_coach_ref,
-            listen_state, listen_install, listen_set_mic, get_autostart, set_autostart, settings_backup, settings_restore, goal_state, goal_set, train_set,
+            listen_state, listen_install, listen_set_mic, get_autostart, set_autostart, settings_backup, settings_restore, goal_state, goal_set, train_set, set_commentary,
             controls::controls_state, controls::controls_assign_button, controls::controls_set_key, controls::controls_clear_button, controls::controls_test])
         .setup(move |app| {
             // Parte con Windows (si può togliere da Impostazioni → App → Avvio)

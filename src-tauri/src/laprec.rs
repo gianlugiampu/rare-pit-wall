@@ -315,6 +315,14 @@ impl LapRec {
                             }
                             let samples = self.my_lap_samples.take();
                             let data = if clean { samples.as_deref().and_then(|sm| reduce(sm, last)) } else { None };
+                            // F15: il giro resta per il commento del replay
+                            if let Some(l) = data.as_ref().and_then(crate::coach::Lap::from_json) {
+                                let mut ml = crate::coach::MY_LAPS.lock().unwrap();
+                                if ml.0 != self.key {
+                                    *ml = (self.key.clone(), Default::default());
+                                }
+                                ml.1.insert(n, (last, l));
+                            }
                             // P12: consiglio del coach (prima di aggiornare il migliore)
                             if let Some(d) = data.as_ref() {
                                 self.coach(d, last * 1000.0);
