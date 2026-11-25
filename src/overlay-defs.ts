@@ -72,6 +72,25 @@ export const DEFS: Record<string, Def> = {
       { key: "big", label: "Resta grande", options: [["3", "3 secondi"], ["4", "4 secondi"], ["6", "6 secondi"], ["10", "10 secondi"]], def: "4" },
     ],
   },
+  curve: {
+    name: "Curve",
+    desc: "Coach: guadagno o perdita curva per curva sul riferimento (tuo migliore o compagno, scelto nella scheda Voce). Verde guadagni, rosso perdi, viola la migliore.",
+    defOn: false,
+    fields: [{ key: "total", label: "Totale del giro in corso", def: true }],
+  },
+  frenata: {
+    name: "Frenata",
+    desc: "Coach: prima di ogni curva la barra si riempie fino al punto di frenata del riferimento, poi «Frena ora». I bip 3-2-1 si scelgono nella scheda Voce.",
+    defOn: false,
+    fields: [{ key: "info", label: "Marcia e velocità minima del riferimento, frenata del giro scorso", def: true }],
+    choices: [{ key: "from", label: "Mostra da", options: [["100", "100 m"], ["200", "200 m"], ["300", "300 m"]], def: "200" }],
+  },
+  tracce: {
+    name: "Gas e freno",
+    desc: "Coach: le tue tracce di gas e freno degli ultimi 4 secondi sopra quelle tratteggiate del riferimento.",
+    defOn: false,
+    fields: [{ key: "legend", label: "Legenda", def: true }],
+  },
   delta: {
     name: "Delta",
     desc: "Quanto sei avanti o indietro rispetto al giro di riferimento, con la barra verde/rossa.",

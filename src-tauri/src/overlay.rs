@@ -41,6 +41,10 @@ pub const KINDS: &[Kind] = &[
     kind("benzina", "Benzina", (190.0, 130.0), (0.88, 0.66)),
     kind("pedali", "Pedali", (340.0, 74.0), (0.66, 0.86)),
     kind("mappa", "Mappa", (230.0, 170.0), (0.1, 0.55)),
+    // Coach in overlay (bozza v1 approvata il 25/11/2026), spenti di base
+    Kind { on: false, ..kind("curve", "Curve", (520.0, 64.0), (0.5, 0.78)) },
+    Kind { on: false, ..kind("frenata", "Frenata", (320.0, 72.0), (0.5, 0.62)) },
+    Kind { on: false, ..kind("tracce", "Gas e freno", (340.0, 100.0), (0.3, 0.86)) },
     // P10: Bandiere grandi senza scritte (bozza v3 approvata il 25/11/2026), spento di base
     Kind { on: false, ..kind("bandiere", "Bandiere", (120.0, 90.0), (0.5, 0.22)) },
     // P13: Stratega (bozza v1 approvata il 25/11/2026), spento di base: si accende dalla scheda Overlay
@@ -104,6 +108,9 @@ impl Default for Settings {
         Settings { enabled: false, show: "pista".into(), items: BTreeMap::new(), layouts: BTreeMap::new(), stream: false, light: false, per_car: true, cars: BTreeMap::new() }
     }
 }
+
+/// Tipo della sessione in corso (per i bip del Coach)
+static STATE_SESSION: Mutex<String> = Mutex::new(String::new());
 
 /// F10 · auto su cui sei adesso (nome di iRacing)
 static CUR_CAR: Mutex<String> = Mutex::new(String::new());
@@ -437,6 +444,8 @@ struct Fast {
     delta_best: Option<f32>,
     delta_session: Option<f32>,
     delta_last: Option<f32>,
+    /// Coach in overlay: curve, prossima frenata, totale sul riferimento
+    coach: Option<crate::coach::View>,
     /// P11: delta sul giro del compagno più veloce (stessa pista e auto), il suo tempo e il nome
     delta_mate: Option<f32>,
     mate_lap: Option<f32>,
@@ -661,6 +670,7 @@ fn start_reader(app: AppHandle) {
         let map_dir = app.path().app_local_data_dir().unwrap_or_else(|_| std::env::temp_dir()).join("mappe");
         *MAP_DIR.lock().unwrap() = Some(map_dir.clone());
         let mut map_key = String::new();
+        let mut coach_live = crate::coach::Live::default();
         let mut recorder = crate::trackmap::Recorder::default();
         loop {
             if sdk.is_none() {
@@ -691,6 +701,15 @@ fn start_reader(app: AppHandle) {
                     fast.delta_session = ok(s, "LapDeltaToSessionBestLap_OK").then(|| f(s, "LapDeltaToSessionBestLap"));
                     fast.delta_last = ok(s, "LapDeltaToSessionLastlLap_OK").then(|| f(s, "LapDeltaToSessionLastlLap"));
                     fast.yaw = f(s, "Yaw");
+                    // Coach in overlay e bip di frenata (in tutte le sessioni: overlay e bip si scelgono)
+                    if let Some(plan) = crate::coach::current_plan() {
+                        let sess = match STATE_SESSION.lock().unwrap().as_str() {
+                            "Race" => 2,
+                            x if x.contains("Qualify") => 1,
+                            _ => 0,
+                        };
+                        fast.coach = Some(coach_live.step(&plan, fast.lap_pct, fast.lap_cur, fast.brake, game.on_track && !ok(s, "OnPitRoad"), sess));
+                    }
                     if let Some((d, lap, name)) = crate::coach::mate_delta(fast.lap_pct, fast.lap_cur) {
                         fast.delta_mate = Some(d);
                         fast.mate_lap = Some(lap);
@@ -724,6 +743,7 @@ fn start_reader(app: AppHandle) {
                         let yaml = s.session_info();
                         let num = s.get("SessionNum").map(|v| v.as_i32()).unwrap_or(0);
                         slow.session = irsdk::yaml_value(&yaml, "SessionType", Some(&format!("SessionNum: {num}\n"))).unwrap_or_default();
+                        *STATE_SESSION.lock().unwrap() = slow.session.clone();
                         slow.inc_limit = irsdk::yaml_value(&yaml, "IncidentLimit", None).and_then(|v| v.parse().ok());
                         let max = irsdk::yaml_value(&yaml, "DriverCarFuelMaxLtr", None).and_then(|v| v.parse::<f32>().ok());
                         let pct = irsdk::yaml_value(&yaml, "DriverCarMaxFuelPct", None).and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0);
@@ -871,8 +891,10 @@ fn start_reader(app: AppHandle) {
             }
             tick = tick.wrapping_add(1);
             let light = STATE.lock().unwrap().settings.light;
-            std::thread::sleep(Duration::from_millis(if !open { 250 } else if light { 50 } else { 16 }));
-            if !open {
+            // i bip di frenata vogliono la lettura veloce anche con gli overlay chiusi
+            let beeping = fast.on_track && fast.coach.is_some() && crate::coach::BEEP.lock().unwrap().0;
+            std::thread::sleep(Duration::from_millis(if !(open || beeping) { 250 } else if light && !beeping { 50 } else { 16 }));
+            if !(open || beeping) {
                 // a 4 Hz i dati lenti vanno aggiornati a ogni giro del ciclo
                 tick = tick.wrapping_add(14);
             }
@@ -1054,6 +1076,12 @@ pub async fn overlay_save(app: AppHandle, enabled: bool, show: String, items: BT
     };
     save(&app, &s);
     sync(&app);
+}
+
+/// Coach in overlay: gas e freno del riferimento (per «Gas e freno»)
+#[tauri::command]
+pub fn overlay_coach_ref() -> Option<serde_json::Value> {
+    crate::coach::ref_traces()
 }
 
 #[tauri::command]

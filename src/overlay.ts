@@ -12,6 +12,7 @@ type Fast = {
   gear: number; speedKmh: number; rpm: number; lapPct: number; lapCur: number;
   deltaBest: number | null; deltaSession: number | null; deltaLast: number | null; carLr: number; yaw: number;
   deltaMate?: number | null; mateLap?: number | null; mateName?: string | null;
+  coach?: CoachView | null;
 };
 type Slow = {
   session: string; lap: number; lapsRemain: number | null; timeRemain: number | null;
@@ -462,6 +463,113 @@ function buildRadarBars(it: Item): View {
   };
 }
 
+// ——— Coach in overlay (bozza v1 approvata): Curve, Frenata, Gas e freno ———
+type CoachView = {
+  rev: number; who: string; total: number | null; cur: number; loss: (number | null)[];
+  next: { n: number; distM: number; now: boolean; gear: number; minSpd: number; lastDiffM: number | null } | null;
+};
+const demoCoach = (t: number): CoachView => {
+  const ph = (t / 6000) % 1;
+  return {
+    rev: 1, who: "", total: 0.21, cur: 5, loss: [-0.04, 0.12, -0.02, 0.18, -0.09, -0.01, null, null, null, null, null, null],
+    next: { n: 7, distM: ph < 0.7 ? Math.round(200 - ph * 280) : 0, now: ph >= 0.7, gear: 3, minSpd: 92, lastDiffM: -6 },
+  };
+};
+const sgn = (x: number) => `${x > 0 ? "+" : x < 0 ? "−" : ""}${Math.abs(x).toFixed(2).replace(".", ",")}`;
+function coachOf(f: Fast): CoachView | null {
+  return f.coach ?? (cfg.edit || !IN_APP ? demoCoach(performance.now()) : null);
+}
+function buildCurve(it: Item): View {
+  const o = (k: string) => opt(it, "curve", k);
+  const el = document.createElement("div");
+  el.className = "panel curve tab";
+  return {
+    el,
+    update(f) {
+      const c = coachOf(f);
+      el.hidden = !c || !c.loss.length;
+      if (!c || el.hidden) return;
+      const best = Math.min(...c.loss.filter((x): x is number => x != null));
+      const ref = c.who ? `contro ${esc(c.who)}` : "contro il tuo migliore";
+      const tot = o("total") && c.total != null ? ` · giro in corso <b class="${c.total < 0 ? "pb" : "bad"}">${sgn(c.total)}</b>` : "";
+      const cells = c.loss
+        .map((l, i) => {
+          const cls = l == null ? "todo" : l === best && l < 0 ? "p" : l < 0 ? "g" : "r";
+          return `<div class="cv ${cls}${i === c.cur ? " now" : ""}"><small>C${i + 1}</small><b>${l == null ? dash : sgn(l)}</b></div>`;
+        })
+        .join("");
+      const html = `<div class="cv-hd"><span class="d">CURVE</span><span>${ref}${tot}</span></div><div class="cv-row" style="grid-template-columns:repeat(${c.loss.length},1fr)">${cells}</div>`;
+      if (html !== el.dataset.html) {
+        el.dataset.html = html;
+        el.innerHTML = html;
+      }
+    },
+  };
+}
+function buildFrenata(it: Item): View {
+  const o = (k: string) => opt(it, "frenata", k);
+  const el = document.createElement("div");
+  el.className = "panel frenata tab";
+  el.innerHTML = `<div class="fr-top"><span class="d"></span><span class="m"></span></div><div class="fr-bar"><i></i><em></em></div><div class="fr-sub"><span class="muted"></span><span></span></div>`;
+  const [lbl, m] = el.querySelectorAll<HTMLElement>(".fr-top span");
+  const bar = el.querySelector(".fr-bar i") as HTMLElement;
+  const [info, diff] = el.querySelectorAll<HTMLElement>(".fr-sub span");
+  if (!o("info")) (el.querySelector(".fr-sub") as HTMLElement).hidden = true;
+  return {
+    el,
+    update(f) {
+      const c = coachOf(f);
+      const nx = c?.next;
+      const from = Number(o("from"));
+      el.hidden = !nx || (!nx.now && nx.distM > from);
+      if (!nx || el.hidden) return;
+      el.classList.toggle("now", nx.now);
+      lbl.textContent = `C${nx.n} · ${nx.now ? "FRENA" : "FRENA TRA"}`;
+      m.textContent = nx.now ? "ORA" : `${Math.round(nx.distM)} m`;
+      bar.style.width = nx.now ? "100%" : `${Math.max(0, Math.min(100, (1 - nx.distM / from) * 100))}%`;
+      info.textContent = `riferimento: ${nx.gear ? `${nx.gear}ª, ` : ""}minima ${Math.round(nx.minSpd)} km/h`;
+      diff.textContent = nx.lastDiffM == null ? "" : `giro scorso ${nx.lastDiffM > 0 ? "+" : "−"}${Math.abs(Math.round(nx.lastDiffM))} m`;
+      diff.className = nx.lastDiffM == null ? "" : Math.abs(nx.lastDiffM) < 5 ? "pb" : "slow";
+    },
+  };
+}
+// riferimento di gas e freno (si chiede al programma quando cambia)
+let refTr: { rev: number; n: number; thr: number[]; brk: number[] } | null = null;
+let refAsked = -1;
+function buildTracce(it: Item): View {
+  const o = (k: string) => opt(it, "tracce", k);
+  const el = document.createElement("div");
+  el.className = "panel tracce tab";
+  el.innerHTML = `<svg viewBox="0 0 340 70" preserveAspectRatio="none"><polyline class="rt" fill="none" stroke="#3ddc84" stroke-width="1.5" stroke-dasharray="4 3" opacity=".6"/><polyline class="rb" fill="none" stroke="#ff4d6a" stroke-width="1.5" stroke-dasharray="4 3" opacity=".6"/><polyline class="mt" fill="none" stroke="#3ddc84" stroke-width="2.5"/><polyline class="mb" fill="none" stroke="#ff4d6a" stroke-width="2.5"/></svg>${o("legend") ? `<div class="tr-leg"><span><i style="background:#3ddc84"></i>gas</span><span><i style="background:#ff4d6a"></i>freno</span><span><i class="dash"></i>riferimento</span></div>` : ""}`;
+  const [rt, rb, mt, mb] = ["rt", "rb", "mt", "mb"].map((c) => el.querySelector(`.${c}`) as SVGPolylineElement);
+  const hist: { thr: number; brk: number; pct: number }[] = [];
+  const N = 240;
+  const y = (v: number) => (64 - v * 58).toFixed(1);
+  return {
+    el,
+    update(f) {
+      const c = coachOf(f);
+      el.hidden = !c;
+      if (!c) return;
+      if (IN_APP && c.rev !== refAsked) {
+        refAsked = c.rev;
+        invoke<typeof refTr>("overlay_coach_ref").then((r) => (refTr = r));
+      }
+      hist.push({ thr: f.throttle, brk: f.brake, pct: f.lapPct });
+      if (hist.length > N) hist.shift();
+      const xs = (i: number) => ((i / (N - 1)) * 340).toFixed(1);
+      mt.setAttribute("points", hist.map((h, i) => `${xs(i)},${y(h.thr)}`).join(" "));
+      mb.setAttribute("points", hist.map((h, i) => `${xs(i)},${y(h.brk)}`).join(" "));
+      const r = refTr;
+      if (r) {
+        const at = (arr: number[], pct: number) => arr[Math.max(0, Math.min(r.n - 1, Math.round(pct * (r.n - 1))))] / 100;
+        rt.setAttribute("points", hist.map((h, i) => `${xs(i)},${y(at(r.thr, h.pct))}`).join(" "));
+        rb.setAttribute("points", hist.map((h, i) => `${xs(i)},${y(at(r.brk, h.pct))}`).join(" "));
+      }
+    },
+  };
+}
+
 // ——— Bandiere (P10, bozza v3 approvata): solo la bandiera, la dice Serena a voce ———
 const FLAG_KINDS: [string, number, string][] = [
   ["black", 0x10000 | 0x20000, "blk"],
@@ -613,6 +721,7 @@ const BUILDERS: Record<string, (it: Item) => View> = {
   delta: buildDelta, sessione: buildSessione, benzina: buildBenzina, pedali: buildPedali,
   relative: carView(buildRelative), classifica: carView(buildClassifica),
   radar: buildRadar, box: buildBox, stratega: buildStratega, bandiere: buildBandiere,
+  curve: buildCurve, frenata: buildFrenata, tracce: buildTracce,
   mappa: (it) => {
     const v = buildMappa(it);
     return {

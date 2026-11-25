@@ -184,9 +184,252 @@ pub fn advice(a: &Lap, b: &Lap, who: &str) -> Option<String> {
     best.map(|(_, s)| s)
 }
 
+// ——— Coach in overlay (bozza v1 approvata il 25/11/2026): Curve, Frenata, Gas e freno, bip 3-2-1 ———
+
+/// Il tuo giro migliore della sessione (riferimento «mio»)
+pub static REF_MINE: Mutex<Option<Lap>> = Mutex::new(None);
+/// Bip di frenata: acceso e in quali sessioni (prova, qualifica, gara), volume 0–1
+pub static BEEP: Mutex<(bool, [bool; 3], f32)> = Mutex::new((true, [true, true, false], 0.8));
+
+/// Una curva del riferimento, in frazioni di giro
+#[derive(Clone)]
+pub struct ZonePlan {
+    pub s: f64,
+    pub e: f64,
+    pub brake: Option<f64>,
+    pub release: Option<f64>,
+    pub min_spd: f64,
+    pub gear: i64,
+    pub t_s: f64,
+    pub t_e: f64,
+}
+
+pub struct Plan {
+    pub rev: u32,
+    pub who: String,
+    pub len_m: f64,
+    pub lap: Lap,
+    pub zones: Vec<ZonePlan>,
+}
+
+impl Plan {
+    /// Tempo del riferimento a una frazione di giro
+    pub fn t_at(&self, pct: f64) -> f64 {
+        let n = self.lap.n;
+        let x = pct.clamp(0.0, 1.0) * (n - 1) as f64;
+        let i = (x.floor() as usize).min(n - 2);
+        self.lap.t[i] + (self.lap.t[i + 1] - self.lap.t[i]) * (x - i as f64)
+    }
+}
+
+fn build_plan(lap: Lap, who: String, rev: u32) -> Plan {
+    let n = lap.n;
+    let step = lap.len_m.max(1.0) / (n - 1) as f64;
+    let up = |m: f64| (m / step).ceil() as usize;
+    let f = |i: usize| i as f64 / (n - 1) as f64;
+    let zones = corners(&lap, step)
+        .iter()
+        .map(|z| {
+            let look = z.s.saturating_sub(up(80.0));
+            let b = first(look, z.apex + 1, |k| lap.brk[k] >= BRAKE_ON);
+            let r = b.and_then(|b| first(b, z.e + 1, |k| lap.brk[k] < BRAKE_ON));
+            let min_spd = lap.spd[z.s..=z.e].iter().cloned().fold(f64::MAX, f64::min);
+            let gear = lap.gear[z.s..=z.e].iter().cloned().filter(|g| *g > 0.0).fold(f64::MAX, f64::min);
+            ZonePlan { s: f(z.s), e: f(z.e), brake: b.map(f), release: r.map(f), min_spd, gear: if gear < 20.0 { gear as i64 } else { 0 }, t_s: lap.t[z.s], t_e: lap.t[z.e] }
+        })
+        .collect();
+    Plan { rev, who, len_m: lap.len_m, lap, zones }
+}
+
+static PLAN: Mutex<Option<(String, std::sync::Arc<Plan>)>> = Mutex::new(None);
+
+/// Il piano del riferimento in uso (compagno, se scelto e scaricato per questa pista e auto, altrimenti il tuo migliore)
+pub fn current_plan() -> Option<std::sync::Arc<Plan>> {
+    let mate = if prefer_mate() {
+        let m = MATE.lock().unwrap();
+        m.as_ref().filter(|(k, _, _)| *k == *CUR.lock().unwrap()).map(|(k, name, l)| (format!("m{k}{}", l.t.last().unwrap_or(&0.0)), name.clone(), l.clone()))
+    } else {
+        None
+    };
+    let (key, who, lap) = match mate {
+        Some(x) => x,
+        None => {
+            let m = REF_MINE.lock().unwrap();
+            let l = m.as_ref()?;
+            let key = format!("p{}", l.t.last().unwrap_or(&0.0));
+            let mut p = PLAN.lock().unwrap();
+            if let Some((k, plan)) = p.as_ref() {
+                if *k == key {
+                    return Some(plan.clone());
+                }
+            }
+            let rev = p.as_ref().map(|(_, x)| x.rev + 1).unwrap_or(1);
+            let plan = std::sync::Arc::new(build_plan(l.clone(), String::new(), rev));
+            *p = Some((key, plan.clone()));
+            return Some(plan);
+        }
+    };
+    let mut p = PLAN.lock().unwrap();
+    if let Some((k, plan)) = p.as_ref() {
+        if *k == key {
+            return Some(plan.clone());
+        }
+    }
+    let rev = p.as_ref().map(|(_, x)| x.rev + 1).unwrap_or(1);
+    let plan = std::sync::Arc::new(build_plan(lap, who, rev));
+    *p = Some((key, plan.clone()));
+    Some(plan)
+}
+
+/// Stato del giro in corso per gli overlay del Coach (nel lettore degli overlay, 60 volte al secondo)
+#[derive(Default)]
+pub struct Live {
+    rev: u32,
+    last_pct: f64,
+    entry: Vec<Option<f64>>,
+    loss: Vec<Option<f32>>,
+    braked: Vec<bool>,
+    brake_diff: Vec<Option<f32>>,
+    stage: Vec<u8>,
+}
+
+/// Dati per gli overlay del Coach
+#[derive(serde::Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct View {
+    pub rev: u32,
+    pub who: String,
+    pub total: Option<f32>,
+    pub cur: i32,
+    pub loss: Vec<Option<f32>>,
+    pub next: Option<NextBrake>,
+}
+
+#[derive(serde::Serialize, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct NextBrake {
+    pub n: usize,
+    pub dist_m: f32,
+    pub now: bool,
+    pub gear: i64,
+    pub min_spd: f32,
+    pub last_diff_m: Option<f32>,
+}
+
+impl Live {
+    /// `session`: 0 prova, 1 qualifica, 2 gara
+    pub fn step(&mut self, plan: &Plan, pct: f32, lap_cur: f32, brake: f32, on_track: bool, session: usize) -> View {
+        let z = plan.zones.len();
+        if self.rev != plan.rev || self.loss.len() != z {
+            *self = Live { rev: plan.rev, last_pct: pct as f64, entry: vec![None; z], loss: vec![None; z], braked: vec![false; z], brake_diff: vec![None; z], stage: vec![0; z] };
+        }
+        let pct = pct as f64;
+        // nuovo giro: si riparte (i metri di frenata del giro scorso restano)
+        if pct < self.last_pct - 0.5 {
+            self.entry = vec![None; z];
+            self.loss = vec![None; z];
+            self.braked = vec![false; z];
+            self.stage = vec![0; z];
+        }
+        let lt = lap_cur as f64;
+        let len = plan.len_m;
+        let (on, sessions, vol) = *BEEP.lock().unwrap();
+        let beeps = on && on_track && sessions.get(session).copied().unwrap_or(false);
+        let mut next: Option<NextBrake> = None;
+        let mut cur = -1;
+        for (i, zp) in plan.zones.iter().enumerate() {
+            if self.last_pct < zp.s && pct >= zp.s {
+                self.entry[i] = Some(lt);
+            }
+            if self.last_pct < zp.e && pct >= zp.e {
+                if let Some(t0) = self.entry[i] {
+                    self.loss[i] = Some(((lt - t0) - (zp.t_e - zp.t_s)) as f32);
+                }
+            }
+            if pct >= zp.s && pct < zp.e {
+                cur = i as i32;
+            }
+            let Some(bp) = zp.brake else { continue };
+            // il tuo punto di frenata rispetto al riferimento (+ = dopo)
+            if !self.braked[i] && pct > bp - 0.03 && pct < zp.e && brake > 0.08 {
+                self.braked[i] = true;
+                self.brake_diff[i] = Some(((pct - bp) * len) as f32);
+            }
+            let dist = (bp - pct) * len;
+            let rel = zp.release.unwrap_or(zp.e);
+            let braking_now = pct >= bp && pct < rel;
+            if (dist > 0.0 && dist <= 400.0) || braking_now {
+                if next.as_ref().map_or(true, |x| dist < x.dist_m as f64) {
+                    next = Some(NextBrake { n: i + 1, dist_m: dist.max(0.0) as f32, now: braking_now, gear: zp.gear, min_spd: zp.min_spd as f32, last_diff_m: self.brake_diff[i] });
+                }
+            }
+            // bip 3-2-1: a 50, 33 e 17 m, lungo al punto di frenata, doppio quando rilasciare
+            if beeps {
+                let st = &mut self.stage[i];
+                let want = if pct >= rel && *st >= 4 { 5 } else if dist <= 0.0 && pct < rel { 4 } else if dist <= 17.0 && dist > 0.0 { 3 } else if dist <= 33.0 && dist > 0.0 { 2 } else if dist <= 50.0 && dist > 0.0 { 1 } else { 0 };
+                if want > *st {
+                    *st = want;
+                    beep(want, vol);
+                }
+            }
+        }
+        self.last_pct = pct;
+        View {
+            rev: plan.rev,
+            who: plan.who.clone(),
+            total: (lap_cur > 0.0).then(|| (lt - plan.t_at(pct)) as f32),
+            cur,
+            loss: self.loss.clone(),
+            next,
+        }
+    }
+}
+
+static BEEPER: Mutex<Option<std::sync::mpsc::Sender<(u8, f32)>>> = Mutex::new(None);
+
+/// Suona un bip: 1–3 corti, 4 lungo (frena), 5 doppio corto (rilascia)
+fn beep(kind: u8, vol: f32) {
+    let mut b = BEEPER.lock().unwrap();
+    if b.is_none() {
+        let (tx, rx) = std::sync::mpsc::channel::<(u8, f32)>();
+        std::thread::spawn(move || {
+            use rodio::Source;
+            let Ok((_stream, handle)) = rodio::OutputStream::try_default() else { return };
+            while let Ok((k, v)) = rx.recv() {
+                let Ok(sink) = rodio::Sink::try_new(&handle) else { continue };
+                let tone = |hz: f32, ms: u64| rodio::source::SineWave::new(hz).take_duration(std::time::Duration::from_millis(ms)).amplify(0.25 * v);
+                let gap = || rodio::source::Zero::<f32>::new(1, 44_100).take_duration(std::time::Duration::from_millis(60));
+                match k {
+                    1..=3 => sink.append(tone(880.0 + 120.0 * k as f32, 70)),
+                    4 => sink.append(tone(1320.0, 380)),
+                    _ => {
+                        sink.append(tone(660.0, 60));
+                        sink.append(gap());
+                        sink.append(tone(660.0, 60));
+                    }
+                }
+                sink.detach();
+            }
+        });
+        *b = Some(tx);
+    }
+    if let Some(tx) = b.as_ref() {
+        let _ = tx.send((kind, vol));
+    }
+}
+
+/// Riferimento per l'overlay «Gas e freno» (gas e freno del riferimento, punti alla stessa distanza)
+pub fn ref_traces() -> Option<serde_json::Value> {
+    current_plan().map(|p| serde_json::json!({ "rev": p.rev, "n": p.lap.n, "thr": p.lap.thr, "brk": p.lap.brk }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    pub(super) fn lap_for_tests(brk_at: usize, slow: f64) -> Lap {
+        lap(brk_at, slow)
+    }
 
     /// Giro finto: rettilineo, frenata al punto `brk_at`, curva lenta, gas pieno; `slow` km/h più lento in curva
     fn lap(brk_at: usize, slow: f64) -> Lap {
@@ -223,5 +466,27 @@ mod tests {
         assert!(a.contains("freni 50 metri prima"), "{a}");
         assert!(advice(&rif, &rif, "").is_none());
         assert!(advice(&mio, &rif, "Luca").unwrap().contains("rispetto a Luca"));
+    }
+}
+
+#[cfg(test)]
+mod tests_plan {
+    use super::*;
+
+    #[test]
+    fn piano_e_bip() {
+        let rif = super::tests::lap_for_tests(200, 0.0);
+        let plan = build_plan(rif, String::new(), 1);
+        assert_eq!(plan.zones.len(), 1);
+        let z = &plan.zones[0];
+        assert!(z.brake.is_some() && z.release.is_some());
+        *BEEP.lock().unwrap() = (false, [true, true, true], 0.0);
+        let mut live = Live::default();
+        let bp = z.brake.unwrap() as f32;
+        let v = live.step(&plan, bp - 0.005, 10.0, 0.0, true, 0);
+        let nx = v.next.unwrap();
+        assert!(!nx.now && nx.dist_m > 20.0 && nx.dist_m < 30.0, "{}", nx.dist_m);
+        let v = live.step(&plan, bp + 0.001, 10.5, 0.5, true, 0);
+        assert!(v.next.unwrap().now);
     }
 }

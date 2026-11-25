@@ -166,6 +166,8 @@ impl LapRec {
             ..Default::default()
         };
         r.update_info(yaml, team_ids);
+        // nuova sessione: il tuo migliore si ricomincia a cercare
+        *crate::coach::REF_MINE.lock().unwrap() = None;
         r
     }
 
@@ -313,6 +315,7 @@ impl LapRec {
                             let better = self.best_tel.as_ref().map(|b| last * 1000.0 < b.1).unwrap_or(true);
                             if better {
                                 if let Some(data) = data {
+                                    *crate::coach::REF_MINE.lock().unwrap() = crate::coach::Lap::from_json(&data);
                                     self.best_tel = Some((n, last * 1000.0, data));
                                 }
                             }

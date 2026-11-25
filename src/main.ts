@@ -75,10 +75,11 @@ async function loadMoments() {
   }
 }
 
-type EngSettings = { enabled: boolean; voice: string | null; volume: number; fuel: boolean; laptime: boolean; gaps: boolean; flags: boolean; race: boolean; strategy: boolean; coach: boolean; coachRef: string };
+type EngSettings = { enabled: boolean; voice: string | null; volume: number; fuel: boolean; laptime: boolean; gaps: boolean; flags: boolean; race: boolean; strategy: boolean; coach: boolean; coachRef: string; beep: boolean; beepPractice: boolean; beepQuali: boolean; beepRace: boolean };
 type VoiceStatus = { state: string; percent: number; message: string };
 type EngState = { settings: EngSettings; voices: { id: string; name: string }[]; voiceStatus: VoiceStatus };
-const FLAGS = ["enabled", "laptime", "fuel", "gaps", "flags", "race", "strategy", "coach"] as const;
+const FLAGS = ["enabled", "laptime", "fuel", "gaps", "flags", "race", "strategy", "coach", "beep"] as const;
+const BEEPS = [["beepPractice", "e-beep-practice"], ["beepQuali", "e-beep-quali"], ["beepRace", "e-beep-race"]] as const;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const num = (x: number, d = 1) => x.toFixed(d).replace(".", ",");
@@ -205,6 +206,7 @@ window.addEventListener("DOMContentLoaded", async () => {
   $<HTMLInputElement>("e-volume").value = String(eng.settings.volume);
   for (const k of FLAGS) $<HTMLInputElement>(`e-${k}`).checked = eng.settings[k];
   $<HTMLSelectElement>("e-coach-ref").value = eng.settings.coachRef || "mio";
+  for (const [k, idEl] of BEEPS) $<HTMLInputElement>(idEl).checked = eng.settings[k];
   const saveEng = () => {
     const settings: EngSettings = {
       ...eng.settings,
@@ -213,6 +215,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       coachRef: $<HTMLSelectElement>("e-coach-ref").value,
     };
     for (const k of FLAGS) settings[k] = $<HTMLInputElement>(`e-${k}`).checked;
+    for (const [k, idEl] of BEEPS) settings[k] = $<HTMLInputElement>(idEl).checked;
     eng.settings = settings;
     return invoke("set_engineer", { settings });
   };

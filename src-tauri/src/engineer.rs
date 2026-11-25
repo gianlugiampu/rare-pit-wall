@@ -28,11 +28,16 @@ pub struct Settings {
     pub coach: bool,
     /// riferimento del coach: "mio" (tuo migliore della sessione) o "compagno" (il più veloce del team, dal sito)
     pub coach_ref: String,
+    /// Coach in overlay: bip di frenata 3-2-1 e in quali sessioni
+    pub beep: bool,
+    pub beep_practice: bool,
+    pub beep_quali: bool,
+    pub beep_race: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { enabled: true, voice: None, volume: 80, fuel: true, laptime: true, gaps: true, flags: true, race: true, strategy: true, coach: true, coach_ref: "mio".into() }
+        Settings { enabled: true, voice: None, volume: 80, fuel: true, laptime: true, gaps: true, flags: true, race: true, strategy: true, coach: true, coach_ref: "mio".into(), beep: true, beep_practice: true, beep_quali: true, beep_race: false }
     }
 }
 
