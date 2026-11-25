@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { initOverlaySettings } from "./overlay-settings";
+import { pickBest, renderHighlight } from "./highlight";
 
 const SITE = "https://rareprojectmotorsport.com";
 
@@ -22,6 +23,7 @@ async function loadMoments() {
   const r = await invoke<RaceMoments | null>("get_moments");
   lastRace = r;
   $("clips").hidden = !r || !r.moments.length;
+  $("hl").hidden = !r || !r.moments.length;
   const badge = $("tab-mom");
   badge.hidden = !r || !r.moments.length;
   badge.textContent = String(r?.moments.length ?? 0);
@@ -251,6 +253,63 @@ window.addEventListener("DOMContentLoaded", async () => {
     setTimeout(showListen, 300);
   });
   mic.addEventListener("change", () => invoke("listen_set_mic", { mic: mic.value }));
+  // F8 · highlight 9:16
+  const hlMode = $<HTMLSelectElement>("hl-mode");
+  try {
+    hlMode.value = localStorage.getItem("hl-mode") ?? "tagliato";
+  } catch {}
+  hlMode.addEventListener("change", () => {
+    try {
+      localStorage.setItem("hl-mode", hlMode.value);
+    } catch {}
+  });
+  let hlKey = "";
+  $("hl-dir").addEventListener("click", () => invoke("open_videos"));
+  $("hl-go").addEventListener("click", async () => {
+    const r = lastRace;
+    const msg = $("hl-msg");
+    if (!r) return;
+    const files = await invoke<Record<string, string>>("clip_files");
+    const checked = new Set([...document.querySelectorAll<HTMLInputElement>(".clip-pick")].filter((c) => c.checked).map((c) => c.dataset.key));
+    const chosen = r.moments.filter((m) => checked.has(m.key) && files[m.key]).slice(0, 5);
+    const ms = chosen.length ? chosen : pickBest(r.moments, (k) => !!files[k], 3);
+    if (!ms.length) {
+      msg.textContent = "Prima esporta le clip dei momenti (qui sopra), poi crea l'highlight.";
+      return;
+    }
+    const btn = $<HTMLButtonElement>("hl-go");
+    btn.disabled = true;
+    msg.textContent = "Disegno la grafica…";
+    try {
+      const fin = r.moments.find((m) => m.kind === "finish");
+      const date = new Date().toLocaleDateString("it-IT");
+      const images = await renderHighlight({ track: r.track, date, result: fin ? fin.text.toUpperCase() : "", moments: ms, mode: hlMode.value as "tagliato" | "intero" });
+      msg.textContent = `Monto il video (${ms.length} clip)…`;
+      const timer = window.setInterval(async () => (msg.textContent = (await invoke<{ message: string }>("clip_status")).message), 700);
+      try {
+        hlKey = await invoke<string>("make_highlight", { keys: ms.map((m) => m.key), images, mode: hlMode.value, name: `${r.track}-${r.subsession}` });
+      } finally {
+        clearInterval(timer);
+      }
+      msg.textContent = "✓ Highlight pronto nella cartella dei video di iRacing.";
+      $("hl-discord").hidden = false;
+    } catch (e) {
+      msg.textContent = String(e);
+    } finally {
+      btn.disabled = false;
+    }
+  });
+  $("hl-discord").addEventListener("click", async () => {
+    if (!hlKey || !lastRace) return;
+    const b = $<HTMLButtonElement>("hl-discord");
+    b.disabled = true;
+    try {
+      b.textContent = await invoke<string>("send_clip", { key: hlKey, text: `🎬 Highlight · ${lastRace.track}` });
+    } catch (e) {
+      $("hl-msg").textContent = String(e);
+      b.disabled = false;
+    }
+  });
   // P6b · clip video dei momenti scelti
   const picks = () => [...document.querySelectorAll<HTMLInputElement>(".clip-pick")];
   $("clip-all").addEventListener("click", (e) => { e.preventDefault(); picks().forEach((c) => (c.checked = true)); });

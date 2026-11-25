@@ -137,4 +137,5 @@ body:has(#main:not([hidden])) { display: flex; flex-direction: column; overflow:
 .bd-list li { padding: 3px 0; border-top: 1px solid var(--line); }
 .bd-list li span { float: right; color: #fff; font-weight: 700; font-variant-numeric: tabular-nums; }
 .bd-list li.rec span { color: var(--p300); }
-
+.ov-obs .row { display: flex; align-items: center; gap: 8px; margin: 10px 0 4px; font-size: 13px; }
+.ov-obs .row input { accent-color: var(--main); width: 16px; height: 16px; margin: 0; flex: none; }

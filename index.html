@@ -151,6 +151,7 @@
             <section class="ov-obs">
               <p class="small">In OBS aggiungi una <b>sorgente browser</b> per ogni grafica che vuoi, con questo indirizzo e la misura indicata
                 (diretta 1920×1080). Funzionano anche con gli overlay spenti, basta che Rare Pit Wall sia aperto. Seguono l'auto inquadrata in iRacing.</p>
+              <label class="row"><input type="checkbox" id="g-director" /> Regia automatica: da spettatore o nel replay, l'inquadratura di iRacing va da sola sulla battaglia più vicina (preferenza al team, almeno 10 s su ognuna)</label>
               <ul id="obs" class="obs-list"></ul>
               <p class="small">Opzioni da aggiungere in fondo all'indirizzo: <b>?scala=1</b> più piccole (1.5 di base) · <b>?righe=15</b> righe della torre ·
                 <b>?secondi=12</b> tempo di ogni logo sponsor · <b>?soglia=2</b> distacco per la battaglia · <b>?prova</b> dati di esempio. Più opzioni insieme con «&amp;».</p>
@@ -249,6 +250,24 @@
               <button type="button" id="clip-dir" class="ghost">Apri cartella</button>
             </div>
             <p id="clip-msg" class="small"></p>
+          </div>
+          <div id="hl" class="box" hidden>
+            <p class="k">Highlight per i social (reel 9:16)</p>
+            <p class="small">Un video verticale 1080×1920 con apertura, le 3 clip migliori (o quelle che spunti) e chiusura, con la grafica Rare. Senza audio: la musica la aggiungi su Instagram o TikTok.</p>
+            <div class="clip-row">
+              <label class="clip-cam">Video
+                <select id="hl-mode">
+                  <option value="tagliato">Tagliato a tutto schermo (consigliato)</option>
+                  <option value="intero">Intero, al centro della grafica</option>
+                </select>
+              </label>
+            </div>
+            <div class="clip-row">
+              <button type="button" id="hl-go">Crea highlight</button>
+              <button type="button" id="hl-discord" class="ghost" hidden>Discord</button>
+              <button type="button" id="hl-dir" class="ghost">Apri cartella</button>
+            </div>
+            <p id="hl-msg" class="small"></p>
           </div>
         </section>
 

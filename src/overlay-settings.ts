@@ -6,7 +6,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen } from "@tauri-apps/api/event";
 import { DEFS, ITEM_DEFAULT, opt, type Config, type Item } from "./overlay-defs";
 
-type Settings = { enabled: boolean; show: string; items: Record<string, Item>; stream?: boolean; light?: boolean; perCar?: boolean };
+type Settings = { enabled: boolean; show: string; items: Record<string, Item>; stream?: boolean; light?: boolean; perCar?: boolean; director?: boolean };
 type State = { settings: Settings; edit: boolean; hidden: boolean; kinds: { id: string; name: string }[]; monitors: string; hasLayout: boolean; obsBase: string; car?: string };
 
 // P8.5 · grafiche per la diretta: indirizzo e misura consigliata della sorgente browser (diretta 1920×1080, scala 1.5)
@@ -141,7 +141,7 @@ const it = (id: string): Item => ({ ...ITEM_DEFAULT, ...(st.settings.items[id] ?
 
 function save() {
   const s = st.settings;
-  if (IN_APP) invoke("overlay_save", { enabled: s.enabled, show: s.show, items: s.items, stream: !!s.stream, light: !!s.light, perCar: s.perCar !== false });
+  if (IN_APP) invoke("overlay_save", { enabled: s.enabled, show: s.show, items: s.items, stream: !!s.stream, light: !!s.light, perCar: s.perCar !== false, director: !!s.director });
   renderGeneral();
 }
 
@@ -157,6 +157,7 @@ function renderGeneral() {
   $<HTMLInputElement>("g-percar").checked = st.settings.perCar !== false;
   $<HTMLInputElement>("g-stream").checked = !!st.settings.stream;
   $<HTMLInputElement>("g-light").checked = !!st.settings.light;
+  $<HTMLInputElement>("g-director").checked = !!st.settings.director;
   $("g-car").textContent = st.car ? `(adesso: ${st.car})` : "";
   $<HTMLSelectElement>("g-show").value = st.settings.show;
   const edit = $<HTMLButtonElement>("g-edit");
@@ -285,7 +286,7 @@ export async function initOverlaySettings() {
     if (!st.settings.enabled) st.edit = false;
     save();
   });
-  for (const [id, key] of [["g-percar", "perCar"], ["g-stream", "stream"], ["g-light", "light"]] as const) {
+  for (const [id, key] of [["g-percar", "perCar"], ["g-stream", "stream"], ["g-light", "light"], ["g-director", "director"]] as const) {
     $(id).addEventListener("change", (e) => {
       st.settings[key] = (e.target as HTMLInputElement).checked;
       save();

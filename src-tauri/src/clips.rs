@@ -348,3 +348,87 @@ mod tests {
         assert_eq!(camera_group("x", "tv"), 0);
     }
 }
+
+// ——— F8 · Highlight automatico (bozza v3 approvata il 25/11/2026): reel 1080×1920 ———
+// Apertura e chiusura di 2 s e le clip dei momenti scelti; le grafiche (PNG 1080×1920) le disegna la finestra
+// con i font del sito. «Tagliato»: il video riempie lo schermo verticale (si taglia ai lati) con la grafica sopra;
+// «Intero»: il video orizzontale al centro della grafica. Senza audio (per i social si aggiunge la musica).
+
+/// `images`: [apertura, chiusura, una per clip] in base64; `mode`: "tagliato" o "intero"
+pub async fn highlight(keys: Vec<String>, images: Vec<String>, mode: String, name: String) -> Result<String, String> {
+    use base64::Engine;
+    let all = files();
+    let clips: Vec<String> = keys.iter().filter_map(|k| all.get(k).cloned()).collect();
+    if clips.is_empty() {
+        return Err("Nessuna clip registrata per questi momenti: esportale prima.".into());
+    }
+    if images.len() != clips.len() + 2 {
+        return Err("Grafiche mancanti".into());
+    }
+    set(|s| s.message = "Preparo l'highlight…".into());
+    let ffmpeg = ensure_ffmpeg().await?;
+    let tmp = std::env::temp_dir().join(format!("rare-highlight-{}", std::process::id()));
+    std::fs::create_dir_all(&tmp).map_err(|e| e.to_string())?;
+    let mut pngs = vec![];
+    for (i, b64) in images.iter().enumerate() {
+        let data = base64::engine::general_purpose::STANDARD.decode(b64.trim_start_matches("data:image/png;base64,")).map_err(|_| "grafica non valida".to_string())?;
+        let p = tmp.join(format!("g{i}.png"));
+        std::fs::write(&p, data).map_err(|e| e.to_string())?;
+        pngs.push(p);
+    }
+    let out_dir = videos_dir().unwrap_or_else(|| tmp.clone());
+    let _ = std::fs::create_dir_all(&out_dir);
+    let safe: String = name.chars().map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' }).collect();
+    let out = out_dir.join(format!("RARE-highlight-{safe}.mp4"));
+    set(|s| s.message = format!("Monto l'highlight ({} clip)…", clips.len()));
+    let (ff, outc, crop) = (ffmpeg.clone(), out.clone(), mode != "intero");
+    let ok = tauri::async_runtime::spawn_blocking(move || {
+        let mut cmd = std::process::Command::new(ff);
+        cmd.arg("-y");
+        // 0 apertura, 1 chiusura (immagini ferme 2 s)
+        for p in &pngs[..2] {
+            cmd.args(["-loop", "1", "-framerate", "30", "-t", "2", "-i"]).arg(p);
+        }
+        // per ogni clip: il video e la sua grafica
+        for (j, c) in clips.iter().enumerate() {
+            cmd.args(["-i", c]);
+            cmd.args(["-loop", "1", "-framerate", "30", "-i"]).arg(&pngs[j + 2]);
+        }
+        let mut f = String::from("[0:v]scale=1080:1920,setsar=1,format=yuv420p[vi];[1:v]scale=1080:1920,setsar=1,format=yuv420p[vo];");
+        for j in 0..clips.len() {
+            let (c, g) = (2 + 2 * j, 3 + 2 * j);
+            if crop {
+                f += &format!("[{c}:v]scale=-2:1920,crop=1080:1920,fps=30,setsar=1[c{j}];[c{j}][{g}:v]overlay=0:0:shortest=1,format=yuv420p[v{j}];");
+            } else {
+                f += &format!("[{c}:v]scale=1080:-2,fps=30,setsar=1[c{j}];[{g}:v]fps=30[b{j}];[b{j}][c{j}]overlay=0:576:shortest=1,setsar=1,format=yuv420p[v{j}];");
+            }
+        }
+        f += "[vi]";
+        for j in 0..clips.len() {
+            f += &format!("[v{j}]");
+        }
+        f += &format!("[vo]concat=n={}:v=1:a=0[out]", clips.len() + 2);
+        cmd.args(["-filter_complex", &f, "-map", "[out]", "-c:v", "libx264", "-preset", "veryfast", "-crf", "23", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an"])
+            .arg(&outc)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null());
+        #[cfg(windows)]
+        {
+            use std::os::windows::process::CommandExt;
+            cmd.creation_flags(0x0800_0000);
+        }
+        cmd.status().map(|s| s.success()).unwrap_or(false)
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let _ = std::fs::remove_dir_all(&tmp);
+    if !ok || !out.exists() {
+        set(|s| s.message = "Highlight non riuscito".into());
+        return Err("Highlight non riuscito (ffmpeg)".into());
+    }
+    let key = format!("highlight-{safe}");
+    remember(&key, &out);
+    set(|s| s.message = format!("✓ Highlight pronto: {}", out.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()));
+    Ok(key)
+}
+

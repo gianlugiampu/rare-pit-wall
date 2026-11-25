@@ -101,11 +101,13 @@ pub struct Settings {
     /// F10 · ricorda quali overlay sono accesi per ogni auto e li riaccende quando sali su quell'auto
     pub per_car: bool,
     pub cars: BTreeMap<String, BTreeMap<String, bool>>,
+    /// F39 · regia automatica: da spettatore o nel replay, l'inquadratura va sulla battaglia più vicina
+    pub director: bool,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { enabled: false, show: "pista".into(), items: BTreeMap::new(), layouts: BTreeMap::new(), stream: false, light: false, per_car: true, cars: BTreeMap::new() }
+        Settings { enabled: false, show: "pista".into(), items: BTreeMap::new(), layouts: BTreeMap::new(), stream: false, light: false, per_car: true, cars: BTreeMap::new(), director: false }
     }
 }
 
@@ -151,6 +153,42 @@ fn exclude_capture(w: &WebviewWindow, on: bool) {
 }
 #[cfg(not(windows))]
 fn exclude_capture(_w: &WebviewWindow, _on: bool) {}
+
+/// F39 · regia automatica: la battaglia da inquadrare (auto che insegue), o None.
+/// `cars`: (indice, posizione, tempo dietro al leader, ai box, del team). Si preferiscono le battaglie con il team.
+pub fn director_pick(cars: &[(usize, i32, f32, bool, bool)]) -> Option<usize> {
+    let mut v: Vec<&(usize, i32, f32, bool, bool)> = cars.iter().filter(|c| c.1 > 0 && !c.3).collect();
+    v.sort_by_key(|c| c.1);
+    let mut best: Option<(f32, usize)> = None;
+    for w in v.windows(2) {
+        let (a, b) = (w[0], w[1]);
+        let gap = b.2 - a.2;
+        if !(0.0..1.5).contains(&gap) {
+            continue;
+        }
+        let score = gap - if a.4 || b.4 { 0.7 } else { 0.0 };
+        if best.map_or(true, |(s, _)| score < s) {
+            best = Some((score, b.0));
+        }
+    }
+    best.map(|(_, i)| i)
+}
+
+/// F39 · cambia l'auto inquadrata (iRacing, telecamera attuale)
+#[cfg(windows)]
+fn camera_on(number: &str) {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{RegisterWindowMessageW, SendNotifyMessageW, HWND_BROADCAST};
+    let name: Vec<u16> = "IRSDK_BROADCASTMSG\0".encode_utf16().collect();
+    let Ok(num) = number.trim().parse::<i32>() else { return };
+    unsafe {
+        let msg = RegisterWindowMessageW(name.as_ptr());
+        if msg != 0 {
+            SendNotifyMessageW(HWND_BROADCAST, msg, ((1u32 & 0xffff) | ((num as u32 & 0xffff) << 16)) as usize, 0);
+        }
+    }
+}
+#[cfg(not(windows))]
+fn camera_on(_number: &str) {}
 
 /// F11 · overlay con informazioni del team, nascosti alla diretta in modalità streaming
 const STREAM_HIDE: &[&str] = &["stratega", "benzina", "box"];
@@ -671,6 +709,9 @@ fn start_reader(app: AppHandle) {
         *MAP_DIR.lock().unwrap() = Some(map_dir.clone());
         let mut map_key = String::new();
         let mut coach_live = crate::coach::Live::default();
+        // F39: regia automatica (auto inquadrata e da quando)
+        let mut dir_target: Option<usize> = None;
+        let mut dir_since = std::time::Instant::now() - Duration::from_secs(60);
         let mut recorder = crate::trackmap::Recorder::default();
         loop {
             if sdk.is_none() {
@@ -853,7 +894,9 @@ fn start_reader(app: AppHandle) {
             let open = windows || obs;
             // il radar a barre vuole le auto più spesso (30 volte al secondo) per muoversi fluido
             let bars_open = app.get_webview_window(&label("radar-barre")).is_some();
+            let director = STATE.lock().unwrap().settings.director && fast.connected && !fast.on_track;
             let need_cars = (bars_open && tick % 2 == 0)
+                || (director && tick % 60 == 0)
                 || (tick % 6 == 0 && (obs || ["relative", "classifica", "mappa", "stratega"].iter().any(|id| app.get_webview_window(&label(id)).is_some())));
             let mut cars: Vec<Car> = vec![];
             if let (true, Some(s)) = (need_cars && fast.connected, sdk.as_mut()) {
@@ -877,6 +920,20 @@ fn start_reader(app: AppHandle) {
                     });
                 }
             }
+            // F39 · regia automatica, una volta al secondo: battaglia più vicina, almeno 10 s su ognuna
+            if director && !cars.is_empty() && tick % 60 == 0 {
+                let d = DRIVERS.lock().unwrap();
+                let list: Vec<(usize, i32, f32, bool, bool)> = cars.iter().map(|c| (c.i, c.pos, c.f2, c.pit, d.list.iter().any(|x| x.idx == c.i && x.rare))).collect();
+                if let Some(pick) = director_pick(&list) {
+                    if dir_target != Some(pick) && dir_since.elapsed() > Duration::from_secs(10) {
+                        if let Some(num) = d.list.iter().find(|x| x.idx == pick).map(|x| x.number.clone()) {
+                            camera_on(&num);
+                            dir_target = Some(pick);
+                            dir_since = std::time::Instant::now();
+                        }
+                    }
+                }
+            }
             if windows {
                 let frame = Frame { fast: &fast, slow: (tick % 15 == 0).then_some(&slow), cars: need_cars.then_some(&cars) };
                 let _ = app.emit_filter("ov-data", &frame, is_overlay_target);
@@ -893,8 +950,8 @@ fn start_reader(app: AppHandle) {
             let light = STATE.lock().unwrap().settings.light;
             // i bip di frenata vogliono la lettura veloce anche con gli overlay chiusi
             let beeping = fast.on_track && fast.coach.is_some() && crate::coach::BEEP.lock().unwrap().0;
-            std::thread::sleep(Duration::from_millis(if !(open || beeping) { 250 } else if light && !beeping { 50 } else { 16 }));
-            if !(open || beeping) {
+            std::thread::sleep(Duration::from_millis(if !(open || beeping || director) { 250 } else if light && !beeping { 50 } else { 16 }));
+            if !(open || beeping || director) {
                 // a 4 Hz i dati lenti vanno aggiornati a ogni giro del ciclo
                 tick = tick.wrapping_add(14);
             }
@@ -1048,7 +1105,7 @@ pub fn overlay_state(app: AppHandle) -> OverlayState {
 
 /// Impostazioni cambiate dalla finestra delle impostazioni (async: aprire finestre da un comando sincrono blocca Windows)
 #[tauri::command]
-pub async fn overlay_save(app: AppHandle, enabled: bool, show: String, items: BTreeMap<String, Item>, stream: Option<bool>, light: Option<bool>, per_car: Option<bool>) {
+pub async fn overlay_save(app: AppHandle, enabled: bool, show: String, items: BTreeMap<String, Item>, stream: Option<bool>, light: Option<bool>, per_car: Option<bool>, director: Option<bool>) {
     let s = {
         let mut st = STATE.lock().unwrap();
         st.settings.enabled = enabled;
@@ -1062,6 +1119,9 @@ pub async fn overlay_save(app: AppHandle, enabled: bool, show: String, items: BT
         }
         if let Some(v) = per_car {
             st.settings.per_car = v;
+        }
+        if let Some(v) = director {
+            st.settings.director = v;
         }
         // F10: gli overlay accesi si ricordano per l'auto in uso
         let car = CUR_CAR.lock().unwrap().clone();
@@ -1194,6 +1254,18 @@ pub fn overlay_hello(window: WebviewWindow) -> serde_json::Value {
         "id": k.map(|k| k.item).unwrap_or(&win), "name": k.map(|k| k.name).unwrap_or(""), "side": k.map(|k| k.edge).unwrap_or(0),
         "config": config_payload(&st.settings, st.edit),
     })
+}
+
+#[cfg(test)]
+mod tests_regia {
+    use super::*;
+    #[test]
+    fn regia() {
+        // 1–2 a 3 s, 3–4 a 0,8 s, 5–6 (team) a 1,2 s → si sceglie il team: 1,2 − 0,7 < 0,8
+        let cars = vec![(0, 1, 0.0, false, false), (1, 2, 3.0, false, false), (2, 3, 10.0, false, false), (3, 4, 10.8, false, false), (4, 5, 20.0, false, true), (5, 6, 21.2, false, false)];
+        assert_eq!(director_pick(&cars), Some(5));
+        assert_eq!(director_pick(&cars[..4]), Some(3));
+    }
 }
 
 #[cfg(test)]
