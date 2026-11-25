@@ -790,10 +790,15 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                     let auto = !load_config_cached(&app, tick).pitwall_auto_off;
                     let event = shared.live_event.lock().unwrap().clone();
                     let on = manual || (auto && event.is_some());
+                    // F24 · telemetria dal vivo per il box: 10 punti al secondo
+                    if on && tick % 2 == 0 {
+                        tracker.sample(f(s, "Throttle"), f(s, "Brake"), st.speed_kmh as f32, st.gear);
+                    }
                     if tick % 40 == 0 {
                         if on {
                             let fpl = if fuel_per_lap.is_empty() { None } else { Some(fuel_per_lap.iter().sum::<f32>() / fuel_per_lap.len() as f32) };
                             let data = tracker.snapshot(s, st.position, st.lap, st.fuel_l, fpl, st.incidents, cars);
+                            tracker.clear_trace();
                             let body = serde_json::json!({
                                 "manual": manual, "auto": auto, "subsession": subsession.parse::<i64>().unwrap_or(0),
                                 "carIdx": tracker.car_idx, "session": session, "track": track, "car": car, "carNumber": tracker.car_number, "data": data,

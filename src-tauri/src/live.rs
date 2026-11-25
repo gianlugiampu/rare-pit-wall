@@ -22,9 +22,24 @@ pub struct Tracker {
     pit_in_lap: bool,
     // distacchi a fine giro (per l'andamento sugli ultimi 5 giri)
     gaps: Vec<(Option<f32>, Option<f32>)>,
+    /// F24 · telemetria dal vivo per il box: gas, freno (0–1), velocità (km/h), marcia degli ultimi 2 secondi, 10 al secondo
+    trace: Vec<(f32, f32, f32, i32)>,
 }
 
 impl Tracker {
+    /// F24 · dopo l'invio si riparte (ogni invio porta solo i punti nuovi)
+    pub fn clear_trace(&mut self) {
+        self.trace.clear();
+    }
+
+    /// F24 · un punto della telemetria dal vivo (si chiama 10 volte al secondo)
+    pub fn sample(&mut self, thr: f32, brk: f32, spd_kmh: f32, gear: i32) {
+        self.trace.push((thr, brk, spd_kmh, gear));
+        if self.trace.len() > 40 {
+            self.trace.remove(0);
+        }
+    }
+
     /// Rilegge le informazioni della sessione (quando cambiano)
     pub fn on_session_info(&mut self, yaml: &str) {
         self.car_idx = irsdk::yaml_value(yaml, "DriverCarIdx", None).and_then(|v| v.parse().ok()).unwrap_or(0);
@@ -168,6 +183,17 @@ impl Tracker {
             "pitLap": pit_lap,
             "stopsLeft": stops_left,
             "tankL": self.tank_l,
+            // F24 · telemetria dal vivo: i punti dall'invio precedente (gas e freno 0–100)
+            "trace": {
+                "thr": self.trace.iter().map(|p| (p.0 * 100.0).round()).collect::<Vec<_>>(),
+                "brk": self.trace.iter().map(|p| (p.1 * 100.0).round()).collect::<Vec<_>>(),
+                "spd": self.trace.iter().map(|p| p.2.round()).collect::<Vec<_>>(),
+                "gear": self.trace.iter().map(|p| p.3).collect::<Vec<_>>(),
+            },
+            "delta": s.get("LapDeltaToBestLap_OK").map(|v| v.as_bool()).unwrap_or(false).then(|| s.get("LapDeltaToBestLap").map(|v| v.as_f64() as f32)).flatten(),
+            "lapCur": s.get("LapCurrentLapTime").map(|v| v.as_f64() as f32),
+            "speedKmh": s.get("Speed").map(|v| (v.as_f64() * 3.6).round()),
+            "gear": s.get("Gear").map(|v| v.as_i32()),
             // V3 · il pilota ha chiamato il box (ora, in secondi dal 1970)
             "call": *CALL.lock().unwrap(),
             "onPitRoad": on_pit,
