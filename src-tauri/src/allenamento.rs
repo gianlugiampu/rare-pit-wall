@@ -31,6 +31,8 @@ pub struct GoalState {
     /// F7: classifica del team (nome, tempo in secondi) e il tuo migliore della sessione
     pub board: Vec<(String, f32)>,
     pub my_best: Option<f32>,
+    /// F20: giri puliti di fila adesso
+    pub streak: u32,
 }
 
 #[derive(Default)]
@@ -43,6 +45,10 @@ struct State {
     board_key: String,
     my_best: Option<f32>,
     record_said: bool,
+    // F20 · serie di giri puliti; F27 · giri della sessione (tutti e puliti) dall'ultimo riepilogo
+    streak: u32,
+    laps_all: u32,
+    laps_clean: Vec<f32>,
 }
 
 static ST: Mutex<Option<State>> = Mutex::new(None);
@@ -62,7 +68,7 @@ pub fn set_goal(goal: Goal) {
 }
 
 pub fn state() -> GoalState {
-    with(|s| GoalState { goal: s.goal.clone(), done: s.done, reached: s.reached, train: TRAIN.load(Ordering::Relaxed), board: s.board.clone(), my_best: s.my_best })
+    with(|s| GoalState { goal: s.goal.clone(), done: s.done, reached: s.reached, train: TRAIN.load(Ordering::Relaxed), board: s.board.clone(), my_best: s.my_best, streak: s.streak })
 }
 
 /// Nuova sessione: obiettivo da capo (resta quello scelto) e migliore della sessione azzerato
@@ -73,7 +79,32 @@ pub fn new_session() {
         s.clean.clear();
         s.my_best = None;
         s.record_said = false;
+        s.streak = 0;
+        s.laps_all = 0;
+        s.laps_clean.clear();
     });
+}
+
+/// F27 · riepilogo a voce quando esci dalla pista (dopo almeno 3 giri dall'ultimo riepilogo)
+pub fn summary() -> Option<String> {
+    with(|s| {
+        if s.laps_all < 3 {
+            return None;
+        }
+        let mut t = format!("{} giri, {} puliti", s.laps_all, s.laps_clean.len());
+        if let Some(best) = s.laps_clean.iter().cloned().reduce(f32::min) {
+            t += &format!(", migliore {}", say_lap(best));
+            let good: Vec<f32> = s.laps_clean.iter().cloned().filter(|x| *x <= best * 1.03).collect();
+            if good.len() >= 3 {
+                let m = good.iter().sum::<f32>() / good.len() as f32;
+                let sd = (good.iter().map(|x| (x - m).powi(2)).sum::<f32>() / (good.len() - 1) as f32).sqrt();
+                t += &format!(", costanza più o meno {}", say_gap(sd));
+            }
+        }
+        s.laps_all = 0;
+        s.laps_clean.clear();
+        Some(t)
+    })
 }
 
 /// F7: classifica del team scaricata dal sito per pista e auto
@@ -89,6 +120,22 @@ pub fn set_board(key: String, board: Vec<(String, f32)>) {
 pub fn on_lap(clean: bool, secs: f32) -> Vec<String> {
     with(|s| {
         let mut out = vec![];
+        // F20 · serie di giri puliti (frasi a 5, 10, 15…) e F27 · conteggio per il riepilogo
+        if secs > 0.0 {
+            s.laps_all += 1;
+            if clean {
+                s.laps_clean.push(secs);
+                s.streak += 1;
+                if s.streak % 5 == 0 {
+                    out.push(format!("{} giri puliti di fila", s.streak));
+                }
+            } else {
+                if s.streak >= 3 {
+                    out.push(format!("Serie interrotta a {} giri puliti", s.streak));
+                }
+                s.streak = 0;
+            }
+        }
         if !clean || secs <= 0.0 {
             if s.goal.kind == "costanza" {
                 s.clean.clear(); // la serie si interrompe
@@ -176,9 +223,27 @@ fn say_gap(g: f32) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// i test usano lo stesso stato: uno alla volta
+    static ONE: Mutex<()> = Mutex::new(());
+
+    #[test]
+    fn serie_e_riepilogo() {
+        let _g = ONE.lock().unwrap_or_else(|e| e.into_inner());
+        *ST.lock().unwrap() = None;
+        let mut said = vec![];
+        for _ in 0..5 {
+            said.extend(on_lap(true, 100.0));
+        }
+        assert!(said.iter().any(|s| s == "5 giri puliti di fila"));
+        assert!(on_lap(false, 105.0).iter().any(|s| s == "Serie interrotta a 5 giri puliti"));
+        let r = summary().unwrap();
+        assert!(r.starts_with("6 giri, 5 puliti, migliore 1 minuto 40 e 0"), "{r}");
+        assert!(summary().is_none());
+    }
 
     #[test]
     fn obiettivi_e_record() {
+        let _g = ONE.lock().unwrap_or_else(|e| e.into_inner());
         *ST.lock().unwrap() = None;
         set_board("1-2".into(), vec![("Luca".into(), 105.5), ("Gigi".into(), 106.0)]);
         set_goal(Goal { kind: "sotto".into(), laps: 3, value: 106.5 });

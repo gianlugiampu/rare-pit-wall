@@ -77,7 +77,7 @@ async function loadMoments() {
   }
 }
 
-type EngSettings = { enabled: boolean; voice: string | null; volume: number; fuel: boolean; laptime: boolean; gaps: boolean; flags: boolean; race: boolean; strategy: boolean; coach: boolean; coachRef: string; beep: boolean; beepPractice: boolean; beepQuali: boolean; beepRace: boolean };
+type EngSettings = { enabled: boolean; voice: string | null; volume: number; fuel: boolean; laptime: boolean; gaps: boolean; flags: boolean; race: boolean; strategy: boolean; coach: boolean; coachRef: string; beep: boolean; beepPractice: boolean; beepQuali: boolean; beepRace: boolean; autoPit: boolean; autoPitTyres: string; autoPitMargin: number };
 type VoiceStatus = { state: string; percent: number; message: string };
 type EngState = { settings: EngSettings; voices: { id: string; name: string }[]; voiceStatus: VoiceStatus };
 const FLAGS = ["enabled", "laptime", "fuel", "gaps", "flags", "race", "strategy", "coach", "beep"] as const;
@@ -215,6 +215,9 @@ window.addEventListener("DOMContentLoaded", async () => {
       voice: sel.value || null,
       volume: Number($<HTMLInputElement>("e-volume").value),
       coachRef: $<HTMLSelectElement>("e-coach-ref").value,
+      autoPit: $<HTMLInputElement>("ap-on").checked,
+      autoPitTyres: $<HTMLSelectElement>("ap-tyres").value,
+      autoPitMargin: Number($<HTMLSelectElement>("ap-margin").value),
     };
     for (const k of FLAGS) settings[k] = $<HTMLInputElement>(`e-${k}`).checked;
     for (const [k, idEl] of BEEPS) settings[k] = $<HTMLInputElement>(idEl).checked;
@@ -222,6 +225,11 @@ window.addEventListener("DOMContentLoaded", async () => {
     return invoke("set_engineer", { settings });
   };
   $("eng").addEventListener("change", saveEng);
+  // F32 · box automatico (salvato con le impostazioni dell'ingegnere)
+  $<HTMLInputElement>("ap-on").checked = !!eng.settings.autoPit;
+  $<HTMLSelectElement>("ap-tyres").value = eng.settings.autoPitTyres || "iracing";
+  $<HTMLSelectElement>("ap-margin").value = String(eng.settings.autoPitMargin ?? 1);
+  $("ap").addEventListener("change", saveEng);
   $("e-test").addEventListener("click", async () => {
     await saveEng();
     await invoke("test_voice");
@@ -380,7 +388,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     }
   });
   // Allenamento: obiettivo della sessione, curva per la frenata, classifica del team
-  type GoalState = { goal: { kind: string; laps: number; value: number }; done: number; reached: boolean; train: number; board: [string, number][]; myBest: number | null };
+  type GoalState = { goal: { kind: string; laps: number; value: number }; done: number; reached: boolean; train: number; board: [string, number][]; myBest: number | null; streak: number };
   const fmtLap = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toFixed(3).padStart(6, "0")}`;
   const parseLap = (t: string) => {
     const m = t.trim().replace(",", ".").match(/^(?:(\d+):)?(\d+(?:\.\d+)?)$/);
@@ -419,7 +427,7 @@ window.addEventListener("DOMContentLoaded", async () => {
     $("bd-list").innerHTML = g.board.length
       ? g.board.map(([n, t], i) => `<li class="${i === 0 ? "rec" : ""}">${n.replace(/</g, "&lt;")}<span>${fmtLap(t)}</span></li>`).join("")
       : `<li>Nessun tempo del team con questa pista e auto (o non sei ancora in sessione).</li>`;
-    $("bd-me").textContent = g.myBest ? `Il tuo migliore in questa sessione: ${fmtLap(g.myBest)}` : "";
+    $("bd-me").textContent = [g.myBest ? `Il tuo migliore in questa sessione: ${fmtLap(g.myBest)}` : "", g.streak ? `Giri puliti di fila: ${g.streak}` : ""].filter(Boolean).join(" · ");
   };
   showGoal();
   setInterval(showGoal, 2000);

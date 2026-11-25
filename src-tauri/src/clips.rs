@@ -81,7 +81,7 @@ fn camera_group(yaml: &str, camera: &str) -> i32 {
 }
 
 #[cfg(windows)]
-fn broadcast(cmd: i32, var1: i32, var2: isize) {
+pub(crate) fn broadcast(cmd: i32, var1: i32, var2: isize) {
     use windows_sys::Win32::UI::WindowsAndMessaging::{RegisterWindowMessageW, SendNotifyMessageW, HWND_BROADCAST};
     let name: Vec<u16> = "IRSDK_BROADCASTMSG\0".encode_utf16().collect();
     let w = ((cmd as u32 & 0xffff) | ((var1 as u32 & 0xffff) << 16)) as usize;
@@ -93,7 +93,7 @@ fn broadcast(cmd: i32, var1: i32, var2: isize) {
     }
 }
 #[cfg(not(windows))]
-fn broadcast(_cmd: i32, _var1: i32, _var2: isize) {}
+pub(crate) fn broadcast(_cmd: i32, _var1: i32, _var2: isize) {}
 
 // Messaggi dell'iRacing SDK
 const CAM_SWITCH_NUM: i32 = 1;

@@ -33,11 +33,17 @@ pub struct Settings {
     pub beep_practice: bool,
     pub beep_quali: bool,
     pub beep_race: bool,
+    /// F32 · box automatico: all'entrata in corsia box, benzina e gomme impostate da sole in iRacing
+    pub auto_pit: bool,
+    /// "tutte", "nessuna" o "iracing" (lascia come impostato in iRacing)
+    pub auto_pit_tyres: String,
+    /// giri di benzina in più oltre a quelli che servono
+    pub auto_pit_margin: f32,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { enabled: true, voice: None, volume: 80, fuel: true, laptime: true, gaps: true, flags: true, race: true, strategy: true, coach: true, coach_ref: "mio".into(), beep: true, beep_practice: true, beep_quali: true, beep_race: false }
+        Settings { enabled: true, voice: None, volume: 80, fuel: true, laptime: true, gaps: true, flags: true, race: true, strategy: true, coach: true, coach_ref: "mio".into(), beep: true, beep_practice: true, beep_quali: true, beep_race: false, auto_pit: false, auto_pit_tyres: "iracing".into(), auto_pit_margin: 1.0 }
     }
 }
 
@@ -103,6 +109,8 @@ pub struct Tele {
     pub forecast: Option<(i32, i32)>,
     /// F13: gomme diverse dalle tue in pista: (quanti secondi a giro sono più veloci, sei con le gomme da asciutto)
     pub tyre_gap: Option<(f32, bool)>,
+    /// F19: la tua auto è fuori pista adesso (quattro ruote fuori)
+    pub off_track: bool,
 }
 
 /// P13 · rientro dopo una sosta fatta adesso
@@ -227,6 +235,12 @@ pub struct Engineer {
     save_said_lap: i32,
     // F13 · ultimo giro in cui si è detto il consiglio sulle gomme da pioggia
     wet_tip_lap: i32,
+    // F30 · penalità da scontare (dalla bandiera nera) e squalifica già detta
+    penalty: bool,
+    dq_said: bool,
+    // F19 · uscite di pista della sessione
+    offs: u32,
+    was_off: bool,
 }
 
 impl Engineer {
@@ -544,6 +558,10 @@ impl Engineer {
             tyre_said: false,
             save_said_lap: -99,
             wet_tip_lap: -99,
+            penalty: false,
+            dq_said: false,
+            offs: 0,
+            was_off: false,
         }
     }
 
@@ -660,6 +678,33 @@ impl Engineer {
             }
         }
 
+        // ——— F30 · penalità: si ricorda a ogni giro finché non è scontata ———
+        if (race || quali) && s.flags {
+            let black = t.flags & BLACK != 0;
+            if t.flags & 0x20000 != 0 && !self.dq_said {
+                self.dq_said = true;
+                self.push("Squalificato dalla direzione gara".into(), true);
+            } else if black {
+                self.penalty = true;
+            } else if self.penalty {
+                self.penalty = false;
+                self.push("Penalità scontata".into(), true);
+            }
+        }
+        // ——— F19 · limiti di pista: ogni uscita con le quattro ruote fuori ———
+        if (race || quali) && s.race && t.on_track && !t.on_pit_road {
+            if t.off_track && !self.was_off {
+                self.offs += 1;
+                let nth = ["", "il primo", "il secondo", "il terzo", "il quarto", "il quinto"].get(self.offs as usize).copied().map(String::from).unwrap_or_else(|| format!("il {}°", self.offs));
+                let text = match t.inc_limit {
+                    Some(l) if l > 0 => format!("Fuori pista, {nth}: sei a {} incidenti su {l}", t.incidents + 1),
+                    _ => format!("Fuori pista, {nth}"),
+                };
+                self.push(text, self.offs >= 3);
+            }
+            self.was_off = t.off_track;
+        }
+
         // ——— Bandiere (solo quelle che lo spotter non dice) ———
         if s.flags && t.on_track && (race || quali) {
             let new = t.flags & !self.prev_flags;
@@ -688,6 +733,10 @@ impl Engineer {
 
     fn lap_messages(&mut self, t: &Tele, s: &Settings, race: bool) {
         let n = self.laps_done;
+        // F30 · penalità ancora da scontare
+        if self.penalty && s.flags {
+            self.push("Penalità ancora da scontare: passa dai box".into(), true);
+        }
         // Tempo del giro: in qualifica sempre, in gara ogni 3 giri o quando è il migliore
         if s.laptime && t.last_lap > 0.0 {
             let pb = t.best_lap > 0.0 && (t.last_lap - t.best_lap).abs() < 0.0005 && (self.best_said == 0.0 || t.best_lap < self.best_said - 0.0005);
@@ -1061,6 +1110,20 @@ fn strategia_window(lap: i32, remain: f32, fuel: f32, per: f32, tank: f32) -> Op
     crate::strategia::pit_window(lap, remain, fuel, per, tank)
 }
 
+// ——— F32 · box automatico ———
+
+/// Litri da mettere per arrivare in fondo con `margin` giri in più (None se il consumo non si conosce ancora)
+pub fn pit_fuel(t: &Tele, margin: f32) -> Option<f32> {
+    let per = t.fuel_per_lap.filter(|p| *p > 0.05)?;
+    let remain = t.laps_remain.map(|r| r as f32).or_else(|| match (t.time_remain, t.best_lap > 0.0) {
+        (Some(sec), true) => Some((sec as f32 / t.best_lap).ceil() + 1.0),
+        _ => None,
+    })?;
+    let need = (remain + margin) * per - t.fuel_l;
+    let room = t.tank_l.map(|tk| (tk - t.fuel_l).max(0.0)).unwrap_or(f32::MAX);
+    Some(need.clamp(0.0, room).ceil())
+}
+
 // ——— F12 · previsione dell'arrivo ———
 
 /// «Arrivo previsto P5; con 3 decimi a giro in meno arrivi P4»
@@ -1190,6 +1253,15 @@ mod tests {
         let t = Tele { ahead_num: "7".into(), behind_num: "12".into(), ahead_pace: Some((106.2, None)), behind_pace: Some((105.8, Some(0.2))), my_stops: Some(0), ahead_stops: Some(1), behind_stops: Some(0), ..Default::default() };
         assert_eq!(answer(&t, "passo"), "Davanti il 7 gira in 1 minuto 46 e 2, dietro il 12 in 1 minuto 45 e 8");
         assert_eq!(answer(&t, "soste"), "Hai fatto 0 soste, il 7 davanti 1, il 12 dietro 0");
+    }
+    #[test]
+    fn box_automatico() {
+        // mancano 10 giri, 2,5 L a giro, 8 L nel serbatoio da 45: (10 + 1) × 2,5 − 8 = 19,5 → 20 L
+        let t = Tele { fuel_per_lap: Some(2.5), laps_remain: Some(10), fuel_l: 8.0, tank_l: Some(45.0), ..Default::default() };
+        assert_eq!(pit_fuel(&t, 1.0), Some(20.0));
+        // non si va oltre il serbatoio
+        let t = Tele { fuel_per_lap: Some(2.5), laps_remain: Some(30), fuel_l: 8.0, tank_l: Some(45.0), ..Default::default() };
+        assert_eq!(pit_fuel(&t, 1.0), Some(37.0));
     }
     #[test]
     fn previsione_frase() {

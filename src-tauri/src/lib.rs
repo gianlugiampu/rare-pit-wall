@@ -369,6 +369,10 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
         let mut pit_learn = strategia::PitLearn::default();
         // F1: battaglia con la stessa auto
         let mut battle = strategia::Battle::default();
+        // F32: box automatico (eri in corsia box nel giro prima)
+        let mut was_pit_road = false;
+        // F27: eri in pista (per il riepilogo quando esci)
+        let mut was_on_track = false;
         // F15: replay commentato (giro che si sta guardando, frasi, prossima frase, ultimo punto del giro)
         let mut comment: (i32, Vec<(f64, String)>, usize, f64) = (-1, vec![], 0, 0.0);
         let mut pct_hist: std::collections::VecDeque<Vec<f32>> = Default::default();
@@ -695,6 +699,7 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                                 Some((pos, better))
                             })
                             .flatten(),
+                        off_track: s.get("PlayerTrackSurface").map(|v| v.as_i32()).unwrap_or(-1) == 0,
                         tyre_gap: (session == "Race" && me >= 0)
                             .then(|| {
                                 // F13: confronto tra chi ha gomme diverse dalle tue (ultimo giro buono)
@@ -825,6 +830,44 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         detector.update(s);
                         pit_learn.update(s);
                     }
+                    // F32 · box automatico: all'entrata in corsia box, in gara, benzina e gomme in iRacing
+                    if tele.on_pit_road && !was_pit_road && session == "Race" && settings.auto_pit && tele.on_track {
+                        let mut parts = vec![];
+                        if let Some(l) = engineer::pit_fuel(&tele, settings.auto_pit_margin) {
+                            if l >= 1.0 {
+                                clips::broadcast(9, 2, l as isize); // irsdk_PitCommand_Fuel, litri
+                                parts.push(format!("{} litri", l as i32));
+                            } else {
+                                clips::broadcast(9, 11, 0); // niente benzina
+                                parts.push("niente benzina".to_string());
+                            }
+                        }
+                        match settings.auto_pit_tyres.as_str() {
+                            "tutte" => {
+                                for c in 3..=6 {
+                                    clips::broadcast(9, c, 0); // LF, RF, LR, RR alla pressione attuale
+                                }
+                                parts.push("4 gomme".into());
+                            }
+                            "nessuna" => {
+                                clips::broadcast(9, 7, 0); // nessun cambio gomme
+                                parts.push("niente gomme".into());
+                            }
+                            _ => {}
+                        }
+                        if !parts.is_empty() {
+                            say_text(&format!("Box preparato: {}", parts.join(" e ")));
+                            site_log(load_config(&app).token, format!("box automatico: {}", parts.join(", ")));
+                        }
+                    }
+                    was_pit_road = tele.on_pit_road;
+                    // F27 · riepilogo a voce quando esci dalla pista (garage o fine sessione)
+                    if was_on_track && !tele.on_track && settings.enabled {
+                        if let Some(text) = allenamento::summary() {
+                            say_text(&text);
+                        }
+                    }
+                    was_on_track = tele.on_track;
                     // F15 · replay commentato: con il replay di iRacing che va e la tua auto inquadrata
                     if coach::COMMENT.load(std::sync::atomic::Ordering::Relaxed) && me >= 0 {
                         let playing = s.get("IsReplayPlaying").map(|v| v.as_bool()).unwrap_or(false);

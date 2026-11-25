@@ -78,6 +78,26 @@
             <ul id="live-msgs" class="live-msgs"></ul>
           </div>
           <p id="result" class="msg ok" hidden></p>
+          <div id="ap" class="box">
+            <label class="live-row"><span>Box automatico (in gara)</span><input type="checkbox" id="ap-on" class="switch" /></label>
+            <p class="small">Quando entri in corsia box, il programma imposta da solo in iRacing la benzina che serve per arrivare in fondo e le gomme come scegli qui. Serena dice cosa ha preparato.</p>
+            <div class="cols2">
+              <label class="field">Gomme
+                <select id="ap-tyres">
+                  <option value="iracing">Come impostato in iRacing</option>
+                  <option value="tutte">Cambia tutte e 4</option>
+                  <option value="nessuna">Non cambiarle</option>
+                </select>
+              </label>
+              <label class="field">Benzina in più
+                <select id="ap-margin">
+                  <option value="0.5">Mezzo giro</option>
+                  <option value="1">1 giro</option>
+                  <option value="2">2 giri</option>
+                </select>
+              </label>
+            </div>
+          </div>
           <div class="box">
             <p class="k">Allenamento</p>
             <div class="cols2">
