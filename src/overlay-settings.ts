@@ -6,8 +6,8 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { listen } from "@tauri-apps/api/event";
 import { DEFS, ITEM_DEFAULT, opt, type Config, type Item } from "./overlay-defs";
 
-type Settings = { enabled: boolean; show: string; items: Record<string, Item>; stream?: boolean; light?: boolean; perCar?: boolean; director?: boolean; night?: string };
-type State = { settings: Settings; edit: boolean; hidden: boolean; kinds: { id: string; name: string }[]; monitors: string; hasLayout: boolean; obsBase: string; car?: string };
+type Settings = { enabled: boolean; show: string; items: Record<string, Item>; stream?: boolean; light?: boolean; perCar?: boolean; perSession?: boolean; director?: boolean; night?: string };
+type State = { settings: Settings; edit: boolean; hidden: boolean; kinds: { id: string; name: string }[]; monitors: string; hasLayout: boolean; obsBase: string; car?: string; session?: string };
 
 // P8.5 · grafiche per la diretta: indirizzo e misura consigliata della sorgente browser (diretta 1920×1080, scala 1.5)
 const OBS: [string, string, string][] = [
@@ -141,7 +141,7 @@ const it = (id: string): Item => ({ ...ITEM_DEFAULT, ...(st.settings.items[id] ?
 
 function save() {
   const s = st.settings;
-  if (IN_APP) invoke("overlay_save", { enabled: s.enabled, show: s.show, items: s.items, stream: !!s.stream, light: !!s.light, perCar: s.perCar !== false, director: !!s.director, night: s.night ?? "auto" });
+  if (IN_APP) invoke("overlay_save", { enabled: s.enabled, show: s.show, items: s.items, stream: !!s.stream, light: !!s.light, perCar: s.perCar !== false, director: !!s.director, night: s.night ?? "auto", perSession: !!s.perSession });
   renderGeneral();
 }
 
@@ -160,6 +160,8 @@ function renderGeneral() {
   $<HTMLInputElement>("g-director").checked = !!st.settings.director;
   $<HTMLSelectElement>("g-night").value = st.settings.night ?? "auto";
   $("g-car").textContent = st.car ? `(adesso: ${st.car})` : "";
+  $<HTMLInputElement>("g-persess").checked = !!st.settings.perSession;
+  $("g-sess").textContent = st.session ? `(adesso: ${st.session})` : "";
   $<HTMLSelectElement>("g-show").value = st.settings.show;
   const edit = $<HTMLButtonElement>("g-edit");
   edit.textContent = st.edit ? "Blocca e salva le posizioni" : "Sposta gli overlay";
@@ -279,6 +281,11 @@ export async function initOverlaySettings() {
     // la modalità «sposta» si può cambiare anche con il tasto rapido o dal menu dell'icona
     await listen<Config>("ov-config", (e) => {
       st.edit = e.payload.edit;
+      // overlay riaccesi da soli (per auto o per tipo di sessione): la scheda mostra quelli giusti
+      if (e.payload.items) {
+        st.settings.items = { ...st.settings.items, ...e.payload.items };
+        renderList();
+      }
       renderGeneral();
     });
   }
@@ -287,7 +294,7 @@ export async function initOverlaySettings() {
     if (!st.settings.enabled) st.edit = false;
     save();
   });
-  for (const [id, key] of [["g-percar", "perCar"], ["g-stream", "stream"], ["g-light", "light"], ["g-director", "director"]] as const) {
+  for (const [id, key] of [["g-percar", "perCar"], ["g-persess", "perSession"], ["g-stream", "stream"], ["g-light", "light"], ["g-director", "director"]] as const) {
     $(id).addEventListener("change", (e) => {
       st.settings[key] = (e.target as HTMLInputElement).checked;
       save();

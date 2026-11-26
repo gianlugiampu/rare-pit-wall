@@ -102,6 +102,9 @@ pub struct Settings {
     /// F10 · ricorda quali overlay sono accesi per ogni auto e li riaccende quando sali su quell'auto
     pub per_car: bool,
     pub cars: BTreeMap<String, BTreeMap<String, bool>>,
+    /// Layout per tipo di sessione (idea scelta il 26/11/2026): overlay accesi diversi in prova, qualifica e gara.
+    /// Si salvano in `cars` con la chiave «auto|tipo» (auto vuota se non si ricordano anche per auto).
+    pub per_session: bool,
     /// F39 · regia automatica: da spettatore o nel replay, l'inquadratura va sulla battaglia più vicina
     pub director: bool,
     /// F21 · modalità notte degli overlay: "auto" (quando in iRacing è notte), "sempre", "mai"
@@ -110,7 +113,7 @@ pub struct Settings {
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { enabled: false, show: "pista".into(), items: BTreeMap::new(), layouts: BTreeMap::new(), stream: false, light: false, per_car: true, cars: BTreeMap::new(), director: false, night: "auto".into() }
+        Settings { enabled: false, show: "pista".into(), items: BTreeMap::new(), layouts: BTreeMap::new(), stream: false, light: false, per_car: true, cars: BTreeMap::new(), per_session: false, director: false, night: "auto".into() }
     }
 }
 
@@ -121,13 +124,36 @@ static STATE_SESSION: Mutex<String> = Mutex::new(String::new());
 static CUR_CAR: Mutex<String> = Mutex::new(String::new());
 
 /// F10 · cambiata auto: si riaccendono gli overlay che avevi con quell'auto
-fn apply_car(app: &AppHandle, car: &str) {
+/// Tipo di sessione per i layout: "prova", "qualifica" o "gara"
+fn session_kind(session: &str) -> &'static str {
+    if session == "Race" {
+        "gara"
+    } else if session.contains("Qualify") {
+        "qualifica"
+    } else {
+        "prova"
+    }
+}
+
+/// Chiave degli overlay ricordati: per auto, per tipo di sessione, o tutte e due
+fn layout_key(s: &Settings, car: &str, session: &str) -> Option<String> {
+    if s.per_session && !session.is_empty() {
+        Some(format!("{}|{}", if s.per_car { car } else { "" }, session_kind(session)))
+    } else if s.per_car && !car.is_empty() {
+        Some(car.to_string())
+    } else {
+        None
+    }
+}
+
+/// Riaccende gli overlay ricordati per l'auto e/o il tipo di sessione in corso
+fn apply_layout(app: &AppHandle) {
+    let car = CUR_CAR.lock().unwrap().clone();
+    let session = STATE_SESSION.lock().unwrap().clone();
     let changed = {
         let mut st = STATE.lock().unwrap();
-        if !st.settings.per_car {
-            return;
-        }
-        let Some(saved) = st.settings.cars.get(car).cloned() else { return };
+        let Some(key) = layout_key(&st.settings, &car, &session) else { return };
+        let Some(saved) = st.settings.cars.get(&key).cloned() else { return };
         let mut changed = false;
         for (id, on) in saved {
             let mut it = st.settings.item(&id);
@@ -798,7 +824,11 @@ fn start_reader(app: AppHandle) {
                         let yaml = s.session_info();
                         let num = s.get("SessionNum").map(|v| v.as_i32()).unwrap_or(0);
                         slow.session = irsdk::yaml_value(&yaml, "SessionType", Some(&format!("SessionNum: {num}\n"))).unwrap_or_default();
+                        let new_session = *STATE_SESSION.lock().unwrap() != slow.session;
                         *STATE_SESSION.lock().unwrap() = slow.session.clone();
+                        if new_session {
+                            apply_layout(&app);
+                        }
                         slow.inc_limit = irsdk::yaml_value(&yaml, "IncidentLimit", None).and_then(|v| v.parse().ok());
                         let max = irsdk::yaml_value(&yaml, "DriverCarFuelMaxLtr", None).and_then(|v| v.parse::<f32>().ok());
                         let pct = irsdk::yaml_value(&yaml, "DriverCarMaxFuelPct", None).and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0);
@@ -815,7 +845,7 @@ fn start_reader(app: AppHandle) {
                         let car = DRIVERS.lock().unwrap().list.iter().find(|d| d.idx == me).map(|d| d.car.clone()).unwrap_or_default();
                         if !car.is_empty() && *CUR_CAR.lock().unwrap() != car {
                             *CUR_CAR.lock().unwrap() = car.clone();
-                            apply_car(&app, &car);
+                            apply_layout(&app);
                         }
                         // pista e configurazione: si carica la mappa già disegnata, se c'è
                         let key = format!(
@@ -1103,6 +1133,8 @@ pub struct OverlayState {
     /// P8.5: indirizzo base delle grafiche per OBS (vuoto se il mini sito non è partito)
     obs_base: String,
     car: String,
+    /// tipo della sessione in corso ("prova", "qualifica", "gara"; vuoto senza iRacing)
+    session: String,
 }
 
 #[tauri::command]
@@ -1121,12 +1153,13 @@ pub fn overlay_state(app: AppHandle) -> OverlayState {
         },
         monitors: key,
         car: CUR_CAR.lock().unwrap().clone(),
+        session: { let s = STATE_SESSION.lock().unwrap().clone(); if s.is_empty() { String::new() } else { session_kind(&s).to_string() } },
     }
 }
 
 /// Impostazioni cambiate dalla finestra delle impostazioni (async: aprire finestre da un comando sincrono blocca Windows)
 #[tauri::command]
-pub async fn overlay_save(app: AppHandle, enabled: bool, show: String, items: BTreeMap<String, Item>, stream: Option<bool>, light: Option<bool>, per_car: Option<bool>, director: Option<bool>, night: Option<String>) {
+pub async fn overlay_save(app: AppHandle, enabled: bool, show: String, items: BTreeMap<String, Item>, stream: Option<bool>, light: Option<bool>, per_car: Option<bool>, director: Option<bool>, night: Option<String>, per_session: Option<bool>) {
     let s = {
         let mut st = STATE.lock().unwrap();
         st.settings.enabled = enabled;
@@ -1141,17 +1174,21 @@ pub async fn overlay_save(app: AppHandle, enabled: bool, show: String, items: BT
         if let Some(v) = per_car {
             st.settings.per_car = v;
         }
+        if let Some(v) = per_session {
+            st.settings.per_session = v;
+        }
         if let Some(v) = director {
             st.settings.director = v;
         }
         if let Some(v) = night {
             st.settings.night = v;
         }
-        // F10: gli overlay accesi si ricordano per l'auto in uso
+        // F10 e layout per sessione: gli overlay accesi si ricordano per l'auto e/o il tipo di sessione in uso
         let car = CUR_CAR.lock().unwrap().clone();
-        if st.settings.per_car && !car.is_empty() {
+        let session = STATE_SESSION.lock().unwrap().clone();
+        if let Some(key) = layout_key(&st.settings, &car, &session) {
             let map = items_on(&st.settings);
-            st.settings.cars.insert(car, map);
+            st.settings.cars.insert(key, map);
         }
         if !enabled {
             st.edit = false;
