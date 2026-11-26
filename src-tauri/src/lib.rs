@@ -409,6 +409,8 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
         let mut pit_learn = strategia::PitLearn::default();
         // F1: battaglia con la stessa auto
         let mut battle = strategia::Battle::default();
+        // difesa della posizione: chi ti segue entro un secondo, dove è più forte di te
+        let mut defense = strategia::Battle::defender();
         // F32: box automatico (eri in corsia box nel giro prima)
         let mut was_pit_road = false;
         // F27: eri in pista (per il riepilogo quando esci)
@@ -825,6 +827,13 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                         let num = if rival >= 0 { overlay::car_brief(rival as usize).map(|c| c.0).unwrap_or_default() } else { String::new() };
                         let st_t = s.get("SessionTime").map(|v| v.as_f64()).unwrap_or(0.0);
                         if let Some(text) = battle.update(if rp >= 0.0 { rival } else { -1 }, &num, mp, rp, st_t, &zones, tele.lap_completed) {
+                            eng.battle_tip(text);
+                        }
+                        // difesa: l'auto dietro, quando non è già lei la battaglia seguita sopra
+                        let chaser = if tele.gap_behind.is_some_and(|g| g < 1.0) && tele.behind_idx != rival { tele.behind_idx } else { -1 };
+                        let cp = pct(s, chaser);
+                        let cnum = if chaser >= 0 { overlay::car_brief(chaser as usize).map(|c| c.0).unwrap_or_default() } else { String::new() };
+                        if let Some(text) = defense.update(if cp >= 0.0 { chaser } else { -1 }, &cnum, mp, cp, st_t, &zones, tele.lap_completed) {
                             eng.battle_tip(text);
                         }
                     }

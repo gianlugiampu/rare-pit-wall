@@ -176,6 +176,8 @@ pub fn pit_window(lap: i32, remain: f32, fuel: f32, per: f32, tank: f32) -> Opti
 /// F1 · battaglia con la stessa auto: in quali curve sei più forte tu e in quali lei
 #[derive(Default)]
 pub struct Battle {
+    /// difesa della posizione (idea scelta il 26/11/2026): l'avversario è dietro, le frasi dicono dove coprirsi
+    pub defend: bool,
     rival: i32,
     laps: i32,
     said: i32,
@@ -189,6 +191,11 @@ pub struct Battle {
 }
 
 impl Battle {
+    /// Battaglia con chi ti segue: frasi di difesa
+    pub fn defender() -> Self {
+        Battle { defend: true, ..Default::default() }
+    }
+
     /// `zones`: curve (inizio, fine) in frazioni di giro; `t`: ora della sessione. Restituisce la frase da dire, se c'è.
     pub fn update(&mut self, rival: i32, rival_num: &str, my_pct: f64, rv_pct: f64, t: f64, zones: &[(f64, f64)], my_lapc: i32) -> Option<String> {
         let z = zones.len();
@@ -199,7 +206,7 @@ impl Battle {
             return None;
         }
         if rival != self.rival || self.diffs.len() != z {
-            *self = Battle { rival, laps: 0, said: 0, last_lapc: my_lapc, last: (my_pct, rv_pct), my_in: vec![None; z], rv_in: vec![None; z], my_dt: vec![None; z], rv_dt: vec![None; z], diffs: vec![vec![]; z] };
+            *self = Battle { defend: self.defend, rival, laps: 0, said: 0, last_lapc: my_lapc, last: (my_pct, rv_pct), my_in: vec![None; z], rv_in: vec![None; z], my_dt: vec![None; z], rv_dt: vec![None; z], diffs: vec![vec![]; z] };
             return None;
         }
         for (i, (s, e)) in zones.iter().enumerate() {
@@ -239,11 +246,20 @@ impl Battle {
         let avg: Vec<Option<f64>> = self.diffs.iter().map(|d| (d.len() >= 2).then(|| d.iter().sum::<f64>() / d.len() as f64)).collect();
         let mine = avg.iter().enumerate().filter_map(|(i, a)| a.filter(|x| *x < -0.05).map(|x| (i, x))).min_by(|a, b| a.1.total_cmp(&b.1));
         let his = avg.iter().enumerate().filter_map(|(i, a)| a.filter(|x| *x > 0.05).map(|x| (i, x))).max_by(|a, b| a.1.total_cmp(&b.1));
-        let text = match (mine, his) {
+        let text = if self.defend {
+            match (mine, his) {
+                (Some((a, _)), Some((b, _))) => format!("Difendi dal {rival_num}: è più forte in curva {}, copri l'interno lì. Tu vai meglio in curva {}", b + 1, a + 1),
+                (None, Some((b, _))) => format!("Difendi dal {rival_num}: è più forte in curva {}, copri l'interno lì", b + 1),
+                (Some((a, _)), None) => format!("Il {rival_num} dietro non è più veloce in nessuna curva: tieni le tue linee, vai meglio in curva {}", a + 1),
+                _ => return None,
+            }
+        } else {
+            match (mine, his) {
             (Some((a, _)), Some((b, _))) => format!("Battaglia con il {rival_num}: sei più forte in curva {}, lui in curva {}", a + 1, b + 1),
             (Some((a, _)), None) => format!("Battaglia con il {rival_num}: sei più forte in curva {}, lì puoi attaccare", a + 1),
             (None, Some((b, _))) => format!("Battaglia con il {rival_num}: lui è più forte in curva {}", b + 1),
             _ => return None,
+            }
         };
         self.said = self.laps;
         Some(text)
@@ -311,6 +327,26 @@ mod tests {
             }
         }
         assert!(out.is_some());
+        assert!(out.unwrap().starts_with("Battaglia con il 7"));
+    }
+
+    #[test]
+    fn difesa() {
+        let zones = vec![(0.1, 0.2), (0.5, 0.6)];
+        let mut b = Battle { defend: true, ..Default::default() };
+        let mut out = None;
+        for lap in 0..4 {
+            let base = lap as f64 * 100.0;
+            for k in 0..=1000 {
+                let p = k as f64 / 1000.0;
+                let rv = (p - if (0.5..0.6).contains(&p) { -0.003 } else { 0.0 }).clamp(0.0, 0.999);
+                let lapc = if k == 1000 { lap + 1 } else { lap };
+                if let Some(x) = b.update(12, "12", p.min(0.999), rv, base + p * 100.0, &zones, lapc) {
+                    out = Some(x);
+                }
+            }
+        }
+        assert_eq!(out.as_deref(), Some("Difendi dal 12: è più forte in curva 2, copri l'interno lì"));
     }
 
     #[test]
