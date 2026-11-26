@@ -105,7 +105,7 @@ function buildDelta(it: Item): View {
   const drawSecs = (cur: number) => {
     secRow.innerHTML = Array.from({ length: nSec }, (_, k) => {
       const t = lastSec[k], b = bestSec[k];
-      const cls = k === cur ? "now" : t == null ? "" : b != null && t <= b + 0.0005 ? "pb" : "slow";
+      const cls = `${t == null ? "" : b != null && t <= b + 0.0005 ? "s-pb" : "s-slow"}${k === cur ? " s-now" : ""}`;
       const txt = t == null ? `S${k + 1}` : b != null && t > b + 0.0005 ? `+${(t - b).toFixed(2).replace(".", ",")}` : t.toFixed(1).replace(".", ",");
       return `<span class="${cls}">${txt}</span>`;
     }).join("");

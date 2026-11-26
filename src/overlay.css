@@ -54,9 +54,9 @@ b { font-weight: 700; color: #fff; }
 .delta .cvs span.now { outline: 1.5px solid #fff; }
 .delta .secs { display: flex; gap: 3px; padding: 0 10px 6px; }
 .delta .secs span { flex: 1; text-align: center; font-size: 10px; font-weight: 700; border-radius: 3px; padding: 1px 0; background: rgb(255 255 255 / .08); color: rgb(255 255 255 / .6); font-variant-numeric: tabular-nums; }
-.delta .secs span.pb { background: var(--lap-pb); color: #06210f; }
-.delta .secs span.slow { background: var(--lap-slow); color: #2b2100; }
-.delta .secs span.now { outline: 1px solid #fff; }
+.delta .secs span.s-pb { background: var(--lap-pb); color: #06210f !important; }
+.delta .secs span.s-slow { background: var(--lap-slow); color: #2b2100 !important; }
+.delta .secs span.s-now { outline: 1px solid #fff; }
 .delta .bottom { display: flex; justify-content: space-between; gap: 8px; padding: 0 10px 6px; font-size: 11px; }
 .delta .bottom:empty { display: none; }
 .delta.only-big .top { padding-bottom: 6px; }
