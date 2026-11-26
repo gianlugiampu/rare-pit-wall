@@ -162,17 +162,22 @@ fn moments_path(app: &AppHandle) -> Option<std::path::PathBuf> {
 }
 
 /// P6 · manda i momenti al sito (e li salva sul PC per «Vai al momento»)
-fn send_moments(app: &AppHandle, shared: Arc<Shared>, race: moments::RaceMoments, final_: bool) {
-    if race.moments.is_empty() {
-        return;
-    }
+/// Momenti salvati sul PC per la scheda Replay (gara, o momenti segnati in prova e qualifica)
+fn keep_moments(app: &AppHandle, shared: &Arc<Shared>, race: &moments::RaceMoments) {
     if let Some(p) = moments_path(app) {
         if let Some(dir) = p.parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let _ = std::fs::write(p, serde_json::to_string(&race).unwrap_or_default());
+        let _ = std::fs::write(p, serde_json::to_string(race).unwrap_or_default());
     }
     *shared.last_moments.lock().unwrap() = Some(race.clone());
+}
+
+fn send_moments(app: &AppHandle, shared: Arc<Shared>, race: moments::RaceMoments, final_: bool) {
+    if race.moments.is_empty() {
+        return;
+    }
+    keep_moments(app, &shared, &race);
     let Some(token) = load_config(app).token else { return };
     tauri::async_runtime::spawn(async move {
         let _ = http()
@@ -423,6 +428,8 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
         let mut live_key = String::new();
         // P6: momenti salienti della gara
         let mut detector = moments::Detector::default();
+        // momenti segnati a mano fuori gara (prova, qualifica): solo sul PC, per il replay e le clip
+        let mut marks = moments::RaceMoments::default();
         let mut moments_sent_at: Option<std::time::Instant> = None;
         // giri di tutte le sessioni per Analisi
         let mut laprec: Option<laprec::LapRec> = None;
@@ -482,6 +489,7 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                             detector.dirty = false;
                             send_moments(&app, shared.clone(), detector.race.clone(), true);
                         }
+                        marks = moments::RaceMoments { subsession: subsession.parse().unwrap_or(0), session_num: num, track: track.clone(), moments: Vec::new(), session_type: session.clone() };
                         if session == "Race" {
                             detector.start_race(subsession.parse().unwrap_or(0), num, &track);
                             site_log(token, format!("gara iniziata: seguo {} auto del team · {track}", detector.team_count()));
@@ -945,10 +953,11 @@ fn start_reader(app: AppHandle, shared: Arc<Shared>) {
                     if MARK.swap(false, std::sync::atomic::Ordering::Relaxed) {
                         if session == "Race" {
                             detector.mark(s);
-                            say_text("Momento segnato");
                         } else {
-                            say_text("I momenti si segnano in gara");
+                            marks.moments.push(detector.mark_moment(s));
+                            keep_moments(&app, &shared, &marks);
                         }
+                        say_text("Momento segnato");
                     }
                     if official && detector.dirty && moments_sent_at.map(|t| t.elapsed().as_secs() >= 10).unwrap_or(true) {
                         detector.dirty = false;

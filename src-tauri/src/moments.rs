@@ -30,6 +30,9 @@ pub struct RaceMoments {
     pub session_num: i32,
     pub track: String,
     pub moments: Vec<Moment>,
+    /// tipo di sessione (Race, Practice, Qualify…): i momenti segnati a mano valgono in tutte
+    #[serde(default)]
+    pub session_type: String,
 }
 
 #[derive(Clone)]
@@ -132,7 +135,7 @@ impl Detector {
         let (cars, team, my_idx) = (std::mem::take(&mut self.cars), std::mem::take(&mut self.team), self.my_idx);
         *self = Detector::default();
         (self.cars, self.team, self.my_idx) = (cars, team, my_idx);
-        self.race = RaceMoments { subsession, session_num, track: track.into(), moments: Vec::new() };
+        self.race = RaceMoments { subsession, session_num, track: track.into(), moments: Vec::new(), session_type: "Race".into() };
     }
 
     fn label(&self, i: usize) -> String {
@@ -160,9 +163,15 @@ impl Detector {
 
     /// V3 · «segna questo momento»: un momento della tua auto all'istante, per rivederlo e farne una clip
     pub fn mark(&mut self, s: &mut Irsdk) {
+        let m = self.mark_moment(s);
+        self.add(m.key, "mark", self.my_idx, m.text, m.lap, m.t);
+    }
+
+    /// Il momento segnato dal pilota (anche fuori gara: prova, qualifica)
+    pub fn mark_moment(&self, s: &mut Irsdk) -> Moment {
         let t = s.get("SessionTime").map(|v| v.as_f64()).unwrap_or(0.0);
         let lap = s.get_at("CarIdxLapCompleted", self.my_idx).map(|v| v.as_i32()).unwrap_or(0) + 1;
-        self.add(format!("mark-{}", t as i64), "mark", self.my_idx, "momento segnato dal pilota".into(), lap, (t - 5.0).max(0.0));
+        Moment { key: format!("mark-{}", t as i64), kind: "mark".into(), car: self.label(self.my_idx), car_number: self.number(self.my_idx), text: "momento segnato dal pilota".into(), lap, t: (t - 5.0).max(0.0), pct: None }
     }
 
     /// Da chiamare a ogni lettura (20 volte al secondo) durante una sessione di gara

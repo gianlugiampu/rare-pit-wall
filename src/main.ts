@@ -15,7 +15,7 @@ type Status = {
 type AppState = { paired: boolean; driver: string | null; version: string; status: Status; dashUrl: string | null; dashQr: string | null; liveAuto: boolean };
 
 type Moment = { key: string; kind: string; car: string; carNumber: string; text: string; lap: number; t: number };
-type RaceMoments = { subsession: number; sessionNum: number; track: string; moments: Moment[] };
+type RaceMoments = { subsession: number; sessionNum: number; track: string; moments: Moment[]; sessionType?: string };
 const ICON: Record<string, string> = { start: "🚦", overtake: "⬆️", lost: "⬇️", offtrack: "⚠️", incident: "💥", fastlap: "⏱️", fastest: "🟣", battle: "⚔️", lastlap: "🏳️", finish: "🏁", mark: "📌" };
 
 let lastRace: RaceMoments | null = null;
@@ -29,11 +29,12 @@ async function loadMoments() {
   badge.textContent = String(r?.moments.length ?? 0);
   const list = $("mom-list");
   if (!r || !r.moments.length) {
-    $("mom-head").textContent = "Nessuna gara ancora: i momenti si segnano da soli durante le gare.";
+    $("mom-head").textContent = "Nessun momento ancora: in gara si segnano da soli; in prova e qualifica con «segna questo momento» (tasto o voce).";
     list.innerHTML = "";
     return;
   }
-  $("mom-head").textContent = `${r.track} · ${r.moments.length} momenti`;
+  const kind: Record<string, string> = { Race: "Gara", Practice: "Prova", "Open Qualify": "Qualifica", "Lone Qualify": "Qualifica", Qualify: "Qualifica", Warmup: "Warmup", "Offline Testing": "Test" };
+  $("mom-head").textContent = `${kind[r.sessionType ?? "Race"] ?? r.sessionType ?? "Gara"} · ${r.track} · ${r.moments.length} moment${r.moments.length === 1 ? "o" : "i"}`;
   list.innerHTML = "";
   // P6b: momenti che hanno già la clip registrata → pulsante «Discord»
   const files = await invoke<Record<string, string>>("clip_files");
