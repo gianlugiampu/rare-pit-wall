@@ -67,7 +67,8 @@ function lapTime(s: number | null | undefined): string {
   const sec = (s - m * 60).toFixed(m ? 2 : 3).padStart(m ? 5 : 6, "0");
   return m ? `${m}:${sec}` : sec;
 }
-const gapText = (g: number) => (Math.abs(g) < 10 ? Math.abs(g).toFixed(1) : Math.round(Math.abs(g)).toString());
+// distacco sempre con un decimale, anche sopra i 10 secondi (richiesta di Gianluca del 26/11/2026)
+const gapText = (g: number) => Math.abs(g).toFixed(1);
 
 function head(title: string): { el: HTMLElement; right: HTMLElement; title: HTMLElement } {
   const el = document.createElement("div");

@@ -133,6 +133,15 @@ impl Piper {
     }
 }
 
+/// Dispositivo audio scelto nella scheda Voce (vuoto = quello predefinito di Windows)
+pub static OUT_DEVICE: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
+/// Nomi dei dispositivi audio di uscita (per la scelta nella scheda Voce)
+pub fn output_devices() -> Vec<String> {
+    use rodio::cpal::traits::{DeviceTrait, HostTrait};
+    rodio::cpal::default_host().output_devices().map(|ds| ds.filter_map(|d| d.name().ok()).collect()).unwrap_or_default()
+}
+
 /// Uscita audio che segue le cuffie di Windows: se il dispositivo predefinito cambia (es. AirPods collegate
 /// dopo l'avvio del programma) si riapre sul nuovo. Va creata e usata nello stesso thread.
 pub struct Out {
@@ -145,16 +154,28 @@ impl Out {
         Out { name: None, stream: None }
     }
 
-    fn default_name() -> Option<String> {
+    /// Il dispositivo da usare: quello scelto (se è collegato), altrimenti il predefinito di Windows
+    fn wanted() -> Option<(String, Option<rodio::cpal::Device>)> {
         use rodio::cpal::traits::{DeviceTrait, HostTrait};
-        rodio::cpal::default_host().default_output_device().and_then(|d| d.name().ok())
+        let host = rodio::cpal::default_host();
+        let pick = OUT_DEVICE.lock().unwrap().clone();
+        if !pick.is_empty() {
+            if let Some(d) = host.output_devices().ok().and_then(|mut ds| ds.find(|d| d.name().ok().as_deref() == Some(pick.as_str()))) {
+                return Some((format!("scelto:{pick}"), Some(d)));
+            }
+        }
+        host.default_output_device().and_then(|d| d.name().ok()).map(|n| (format!("windows:{n}"), None))
     }
 
     pub fn handle(&mut self) -> Option<&rodio::OutputStreamHandle> {
-        let now = Self::default_name();
+        let want = Self::wanted();
+        let now = want.as_ref().map(|w| w.0.clone());
         if self.stream.is_none() || now != self.name {
             self.stream = None; // chiude prima il vecchio
-            self.stream = rodio::OutputStream::try_default().ok();
+            self.stream = match want.and_then(|w| w.1) {
+                Some(dev) => rodio::OutputStream::try_from_device(&dev).ok().or_else(|| rodio::OutputStream::try_default().ok()),
+                None => rodio::OutputStream::try_default().ok(),
+            };
             self.name = now;
         }
         self.stream.as_ref().map(|(_, h)| h)
@@ -186,6 +207,13 @@ fn worker(mut child: Child, mut stdin: ChildStdin, stdout: ChildStdout, rx: Rece
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// Prova manuale: elenco dei dispositivi audio di uscita di questo PC
+    #[test]
+    #[ignore]
+    fn dispositivi() {
+        println!("{:?}", output_devices());
+    }
+
     /// Prova manuale: RPW_VOICE_DIR = cartella con piper/piper.exe, serena.onnx, serena.onnx.json
     #[test]
     #[ignore]

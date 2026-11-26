@@ -1209,11 +1209,18 @@ fn install_voice(app: AppHandle, shared: tauri::State<Arc<Shared>>) {
     install_serena(&app, shared.inner());
 }
 
+/// Dispositivi audio di uscita (scheda Voce)
+#[tauri::command]
+fn audio_outputs() -> Vec<String> {
+    voice::output_devices()
+}
+
 #[tauri::command]
 fn set_engineer(app: AppHandle, shared: tauri::State<Arc<Shared>>, settings: engineer::Settings) {
     *shared.engineer.lock().unwrap() = settings.clone();
     *coach::PREF.lock().unwrap() = settings.coach_ref.clone();
     coach::DISCOVER.store(settings.discover, std::sync::atomic::Ordering::Relaxed);
+    *voice::OUT_DEVICE.lock().unwrap() = settings.out_device.clone();
     *coach::BEEP.lock().unwrap() = (settings.beep, [settings.beep_practice, settings.beep_quali, settings.beep_race], settings.volume as f32 / 100.0);
     let mut c = load_config(&app);
     let wants_serena = settings.enabled && matches!(settings.voice.as_deref(), None | Some(voice::SERENA));
@@ -1295,6 +1302,7 @@ fn settings_restore(app: AppHandle, shared: tauri::State<Arc<Shared>>) -> Result
         *shared.engineer.lock().unwrap() = e.clone();
         *coach::PREF.lock().unwrap() = e.coach_ref.clone();
         coach::DISCOVER.store(e.discover, std::sync::atomic::Ordering::Relaxed);
+        *voice::OUT_DEVICE.lock().unwrap() = e.out_device.clone();
         c.engineer = e;
     }
     if let Some(m) = v.get("microfono").and_then(|m| m.as_str()) {
@@ -1455,7 +1463,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(shared.clone())
         .invoke_handler(tauri::generate_handler![get_state, pair, unpair, check_pairing, get_engineer, set_engineer, test_voice, install_voice, set_live_manual, set_live_auto, get_moments, jump_to_moment, export_clips, clip_status, cancel_clips, open_videos, clip_files, send_clip, make_highlight,
-            overlay::overlay_state, overlay::overlay_save, overlay::overlay_edit, overlay::overlay_set_scale, overlay::overlay_reset, overlay::overlay_open_settings, overlay::overlay_hello, overlay::overlay_drivers, overlay::overlay_map, overlay::overlay_map_dir, overlay::overlay_coach_ref,
+            overlay::overlay_state, overlay::overlay_save, overlay::overlay_edit, overlay::overlay_set_scale, audio_outputs, overlay::overlay_reset, overlay::overlay_open_settings, overlay::overlay_hello, overlay::overlay_drivers, overlay::overlay_map, overlay::overlay_map_dir, overlay::overlay_coach_ref,
             listen_state, listen_install, listen_set_mic, get_autostart, set_autostart, settings_backup, settings_restore, goal_state, goal_set, train_set, set_commentary, report_error,
             controls::controls_state, controls::controls_assign_button, controls::controls_set_key, controls::controls_clear_button, controls::controls_test])
         .setup(move |app| {
@@ -1520,6 +1528,7 @@ pub fn run() {
             }
             *coach::PREF.lock().unwrap() = eng_settings.coach_ref.clone();
             coach::DISCOVER.store(eng_settings.discover, std::sync::atomic::Ordering::Relaxed);
+            *voice::OUT_DEVICE.lock().unwrap() = eng_settings.out_device.clone();
             *coach::BEEP.lock().unwrap() = (eng_settings.beep, [eng_settings.beep_practice, eng_settings.beep_quali, eng_settings.beep_race], eng_settings.volume as f32 / 100.0);
             *shared.engineer.lock().unwrap() = eng_settings;
             // P6b: cartella dati per l'elenco delle clip e ffmpeg

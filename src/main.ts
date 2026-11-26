@@ -78,7 +78,7 @@ async function loadMoments() {
   }
 }
 
-type EngSettings = { enabled: boolean; voice: string | null; volume: number; fuel: boolean; laptime: boolean; gaps: boolean; flags: boolean; race: boolean; strategy: boolean; coach: boolean; coachRef: string; beep: boolean; beepPractice: boolean; beepQuali: boolean; beepRace: boolean; autoPit: boolean; autoPitTyres: string; autoPitMargin: number; discover: boolean };
+type EngSettings = { enabled: boolean; voice: string | null; volume: number; fuel: boolean; laptime: boolean; gaps: boolean; flags: boolean; race: boolean; strategy: boolean; coach: boolean; coachRef: string; beep: boolean; beepPractice: boolean; beepQuali: boolean; beepRace: boolean; autoPit: boolean; autoPitTyres: string; autoPitMargin: number; discover: boolean; outDevice: string };
 type VoiceStatus = { state: string; percent: number; message: string };
 type EngState = { settings: EngSettings; voices: { id: string; name: string }[]; voiceStatus: VoiceStatus };
 const FLAGS = ["enabled", "laptime", "fuel", "gaps", "flags", "race", "strategy", "coach", "beep", "discover"] as const;
@@ -215,6 +215,17 @@ window.addEventListener("DOMContentLoaded", async () => {
   setInterval(async () => showVoice((await invoke<EngState>("get_engineer")).voiceStatus), 1000);
   $("v-install").addEventListener("click", () => invoke("install_voice"));
   $<HTMLInputElement>("e-volume").value = String(eng.settings.volume);
+  // dispositivo audio di Serena e dei bip
+  const outSel = $<HTMLSelectElement>("e-out");
+  const fillOut = async () => {
+    const list = await invoke<string[]>("audio_outputs").catch(() => [] as string[]);
+    const cur = eng.settings.outDevice || "";
+    const names = cur && !list.includes(cur) ? [...list, cur] : list;
+    outSel.innerHTML = `<option value="">Quello di Windows (segue le cuffie collegate)</option>` + names.map((n) => `<option value="${n.replace(/"/g, "&quot;")}">${n.replace(/</g, "&lt;")}${list.includes(n) ? "" : " (non collegato)"}</option>`).join("");
+    outSel.value = cur;
+  };
+  fillOut();
+  outSel.addEventListener("focus", fillOut);
   for (const k of FLAGS) $<HTMLInputElement>(`e-${k}`).checked = eng.settings[k];
   $<HTMLSelectElement>("e-coach-ref").value = eng.settings.coachRef || "mio";
   for (const [k, idEl] of BEEPS) $<HTMLInputElement>(idEl).checked = eng.settings[k];
@@ -224,6 +235,7 @@ window.addEventListener("DOMContentLoaded", async () => {
       voice: sel.value || null,
       volume: Number($<HTMLInputElement>("e-volume").value),
       coachRef: $<HTMLSelectElement>("e-coach-ref").value,
+      outDevice: $<HTMLSelectElement>("e-out").value,
       autoPit: $<HTMLInputElement>("ap-on").checked,
       autoPitTyres: $<HTMLSelectElement>("ap-tyres").value,
       autoPitMargin: Number($<HTMLSelectElement>("ap-margin").value),

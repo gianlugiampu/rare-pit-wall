@@ -41,11 +41,13 @@ pub struct Settings {
     pub auto_pit_margin: f32,
     /// Modalità Scoperta: in prova, prima di ogni curva verso, marcia e frenata
     pub discover: bool,
+    /// Dispositivo audio per Serena e i bip (vuoto = quello predefinito di Windows)
+    pub out_device: String,
 }
 
 impl Default for Settings {
     fn default() -> Self {
-        Settings { enabled: true, voice: None, volume: 80, fuel: true, laptime: true, gaps: true, flags: true, race: true, strategy: true, coach: true, coach_ref: "mio".into(), beep: true, beep_practice: true, beep_quali: true, beep_race: false, auto_pit: false, auto_pit_tyres: "iracing".into(), auto_pit_margin: 1.0, discover: false }
+        Settings { enabled: true, voice: None, volume: 80, fuel: true, laptime: true, gaps: true, flags: true, race: true, strategy: true, coach: true, coach_ref: "mio".into(), beep: true, beep_practice: true, beep_quali: true, beep_race: false, auto_pit: false, auto_pit_tyres: "iracing".into(), auto_pit_margin: 1.0, discover: false, out_device: String::new() }
     }
 }
 
