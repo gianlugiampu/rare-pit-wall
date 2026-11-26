@@ -104,6 +104,7 @@ export const DEFS: Record<string, Def> = {
       { key: "last", label: "Ultimo giro", def: true },
       { key: "sector", label: "Delta del settore", def: true },
       { key: "sectors", label: "Settori colorati (verde tuo migliore, giallo più lento)", def: true },
+      { key: "curves", label: "Curve del Coach, solo colori (verde guadagni, rosso perdi, viola la migliore)", def: true },
     ],
     choices: [
       {

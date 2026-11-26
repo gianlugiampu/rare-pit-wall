@@ -93,6 +93,10 @@ function buildDelta(it: Item): View {
   const secRow = document.createElement("div");
   secRow.className = "secs";
   if (o("sectors")) el.append(secRow);
+  // curve del Coach, solo colori (bozza approvata il 26/11/2026): verde guadagni, rosso perdi, viola la migliore
+  const cvRow = document.createElement("div");
+  cvRow.className = "cvs";
+  if (o("curves")) el.append(cvRow);
   let sector = -1, sectorStart = 0;
   let sIdx = -1, sT0 = 0, prevPct = 0, prevCur = 0, nSec = 0;
   let bestSec: (number | null)[] = [];
@@ -141,6 +145,18 @@ function buildDelta(it: Item): View {
         const b = sec.lastElementChild as HTMLElement;
         b.textContent = fmtDelta(sd);
         b.className = tone(sd);
+      }
+      if (o("curves")) {
+        const c = coachOf(f);
+        cvRow.hidden = !c || !c.loss.length;
+        if (c && c.loss.length) {
+          const best = Math.min(...c.loss.filter((x): x is number => x != null));
+          const html = c.loss.map((l, i) => `<span class="${l == null ? "n" : l === best && l < 0 ? "p" : l < 0 ? "g" : "r"}${i === c.cur ? " now" : ""}"></span>`).join("");
+          if (html !== cvRow.dataset.html) {
+            cvRow.dataset.html = html;
+            cvRow.innerHTML = html;
+          }
+        }
       }
       // tempi dei settori: si chiude un settore quando si passa all'inizio del successivo (o al traguardo)
       if (o("sectors") && starts.length) {
