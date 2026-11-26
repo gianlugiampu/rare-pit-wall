@@ -1146,6 +1146,22 @@ pub async fn overlay_save(app: AppHandle, enabled: bool, show: String, items: BT
     sync(&app);
 }
 
+/// Modalità «sposta»: grandezza di un overlay cambiata trascinando l'angolo (40–300 %)
+#[tauri::command]
+pub fn overlay_set_scale(app: AppHandle, id: String, scale: u16) {
+    let scale = scale.clamp(40, 300);
+    let s = {
+        let mut st = STATE.lock().unwrap();
+        let mut it = st.settings.item(&id);
+        it.scale = scale;
+        st.settings.items.insert(id.clone(), it);
+        st.settings.clone()
+    };
+    save(&app, &s);
+    // la scheda Overlay aggiorna il cursore «Grandezza»
+    let _ = app.emit("ov-scale", serde_json::json!({ "id": id, "scale": scale }));
+}
+
 /// Coach in overlay: gas e freno del riferimento (per «Gas e freno»)
 #[tauri::command]
 pub fn overlay_coach_ref() -> Option<serde_json::Value> {

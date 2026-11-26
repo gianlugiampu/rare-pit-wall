@@ -237,7 +237,7 @@ function renderDetail() {
   box.append(k1);
   if (!d.noLook) {
     slider("Sfondo", 0, 100, 5, i.opacity, "%", (v) => setItem(sel, (x) => (x.opacity = v)));
-    slider("Grandezza", 60, 200, 5, i.scale, "%", (v) => setItem(sel, (x) => (x.scale = v)));
+    slider("Grandezza", 40, 300, 5, i.scale, "%", (v) => setItem(sel, (x) => (x.scale = v)));
   }
   for (const r of d.ranges ?? []) {
     slider(r.label, r.min, r.max, r.step, Number(opt(i, sel, r.key)), r.unit, (v) => setItem(sel, (x) => (x.opts[r.key] = v)));
@@ -316,4 +316,10 @@ export async function initOverlaySettings() {
   renderObs();
   renderControls();
   if (IN_APP) await listen("controls-changed", () => renderControls());
+  // grandezza cambiata trascinando l'angolo dell'overlay (modalità «sposta»)
+  if (IN_APP)
+    await listen<{ id: string; scale: number }>("ov-scale", (e) => {
+      st.settings.items[e.payload.id] = { ...it(e.payload.id), scale: e.payload.scale };
+      if (sel === e.payload.id) renderDetail();
+    });
 }

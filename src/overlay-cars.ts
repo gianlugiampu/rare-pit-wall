@@ -180,11 +180,13 @@ export function buildRelative(it: Item): CarView {
           const isMe = tone === "me";
           const nameCls = isMe ? "me" : d?.rare ? "rare" : tone;
           const extra = o("team") ? `<span class="team">${esc(d?.team && d.team !== d.full ? d.team : d?.flair ?? "")}</span>` : "";
-          return `<div class="row${isMe ? " mine" : d?.rare ? " mate" : ""}">
+          // multiclasse: le auto di un'altra classe hanno l'etichetta della classe e sono un po' più chiare
+          const other = !!(o("otherClass") && meD && d && d.classId !== meD.classId);
+          return `<div class="row${isMe ? " mine" : d?.rare ? " mate" : ""}${other ? " other-cls" : ""}">
             ${o("classColor") ? `<span class="cls" style="background:${d?.classColor || "transparent"}"></span>` : ""}
             ${posPill(c.cpos || c.pos)}
             <span class="num d">${esc(d?.number ?? "")}</span>
-            <span class="name ${nameCls}">${esc(d?.name ?? "")}</span>${extra}
+            <span class="name ${nameCls}">${esc(d?.name ?? "")}</span>${extra}${other && d ? `<span class="cls-tag" style="border-color:${d.classColor || "#888"}">${esc(d.className)}</span>` : ""}
             <span class="pit-slot">${c.pit ? `<span class="pit">PIT</span>` : ""}</span>
             ${o("lic") ? licChip(d) : ""}
             ${o("last") ? `<span class="t-last">${lapTime(c.last)}</span>` : ""}
@@ -220,53 +222,55 @@ export function buildClassifica(it: Item): CarView {
       if (!cars || !s) return;
       track(cars, s);
       const meD = drivers.get(s.me);
-      const cls = meD?.classId;
-      const mine = cars.filter((c) => drivers.has(c.i) && (cls == null || drivers.get(c.i)!.classId === cls));
-      mine.sort((a, b) => (a.cpos > 0 ? a.cpos : 999) - (b.cpos > 0 ? b.cpos : 999) || (a.best > 0 ? a.best : 1e9) - (b.best > 0 ? b.best : 1e9));
       const race = s.session === "Race";
-      h.title.textContent = meD?.className ? `Classifica · ${meD.className}` : "Classifica";
+      const multi = o("classes") === "all" && new Set([...drivers.values()].map((d) => d.classId)).size > 1;
+      h.title.textContent = multi ? "Classifica · tutte le classi" : meD?.className ? `Classifica · ${meD.className}` : "Classifica";
       const now = new Date();
       const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
       h.right.textContent = s.lapsTotal ? `giro ${Math.max(s.lap, 0)} / ${s.lapsTotal} · ${hhmm}` : hhmm;
-      const leader = mine[0];
       const ird = o("irDelta") ? irFor(cars, s, s.me) : new Map<number, number>();
-      const fastest = Math.min(...mine.map((c) => (c.best > 0 ? c.best : Infinity)));
-      const gapTo = (c: Car, ref: Car | undefined): string => {
-        if (!ref || c === ref) return c === leader ? (race ? "Leader" : lapTime(c.best)) : dash;
-        if (race) {
-          const laps = Math.floor(ref.lap + ref.pct - (c.lap + c.pct));
-          if (laps >= 1) return `+${laps} G`;
-          const g = c.f2 - ref.f2;
-          return g > 0 ? `+${g.toFixed(1)}` : dash;
+      const sortCls = (l: Car[]) => l.sort((x, y) => (x.cpos > 0 ? x.cpos : 999) - (y.cpos > 0 ? y.cpos : 999) || (x.best > 0 ? x.best : 1e9) - (y.best > 0 ? y.best : 1e9));
+      // una classe: tutta, oppure primi 3 + intorno a te (per le altre classi solo i primi 3)
+      const renderClass = (list: Car[], withMe: boolean) => {
+        const leader = list[0];
+        const fastest = Math.min(...list.map((c) => (c.best > 0 ? c.best : Infinity)));
+        const gapTo = (c: Car, ref: Car | undefined): string => {
+          if (!ref || c === ref) return c === leader ? (race ? "Leader" : lapTime(c.best)) : dash;
+          if (race) {
+            const laps = Math.floor(ref.lap + ref.pct - (c.lap + c.pct));
+            if (laps >= 1) return `+${laps} G`;
+            const g = c.f2 - ref.f2;
+            return g > 0 ? `+${g.toFixed(1)}` : dash;
+          }
+          return c.best > 0 && ref.best > 0 ? `+${(c.best - ref.best).toFixed(3)}` : dash;
+        };
+        let shown: (Car | null)[] = list;
+        if (!all || !withMe) {
+          const meI = withMe ? list.findIndex((c) => c.i === s.me) : -1;
+          const keep = new Set<number>();
+          for (let k = 0; k < Math.min(top, list.length); k++) keep.add(k);
+          if (withMe) {
+            if (meI >= 0) for (let k = Math.max(0, meI - around); k <= Math.min(list.length - 1, meI + around); k++) keep.add(k);
+            else for (let k = top; k < Math.min(list.length, top + around * 2 + 1); k++) keep.add(k);
+          }
+          shown = [];
+          let prev = -1;
+          for (const k of [...keep].sort((x, y) => x - y)) {
+            if (prev >= 0 && k > prev + 1) shown.push(null);
+            shown.push(list[k]);
+            prev = k;
+          }
         }
-        return c.best > 0 && ref.best > 0 ? `+${(c.best - ref.best).toFixed(3)}` : dash;
-      };
-      // righe: tutta la classe, oppure primi 3 + le auto intorno a te
-      let shown: (Car | null)[] = mine;
-      if (!all) {
-        const meI = mine.findIndex((c) => c.i === s.me);
-        const keep = new Set<number>();
-        for (let k = 0; k < Math.min(top, mine.length); k++) keep.add(k);
-        if (meI >= 0) for (let k = Math.max(0, meI - around); k <= Math.min(mine.length - 1, meI + around); k++) keep.add(k);
-        else for (let k = top; k < Math.min(mine.length, top + around * 2 + 1); k++) keep.add(k);
-        shown = [];
-        let prev = -1;
-        for (const k of [...keep].sort((a, b) => a - b)) {
-          if (prev >= 0 && k > prev + 1) shown.push(null);
-          shown.push(mine[k]);
-          prev = k;
-        }
-      }
-      body.innerHTML = shown
-        .map((c) => {
-          if (!c) return `<div class="sep"></div>`;
-          const d = drivers.get(c.i);
-          const isMe = c.i === s.me;
-          const k = mine.indexOf(c);
-          const st = startPos.get(c.i);
-          const chg = race && st && c.cpos > 0 ? st - c.cpos : 0;
-          const bestCls = c.best > 0 && c.best === fastest ? "best" : isMe ? "pb" : "muted";
-          return `<div class="row${isMe ? " mine" : d?.rare ? " mate" : ""}">
+        return shown
+          .map((c) => {
+            if (!c) return `<div class="sep"></div>`;
+            const d = drivers.get(c.i);
+            const isMe = c.i === s.me;
+            const k = list.indexOf(c);
+            const st = startPos.get(c.i);
+            const chg = race && st && c.cpos > 0 ? st - c.cpos : 0;
+            const bestCls = c.best > 0 && c.best === fastest ? "best" : isMe ? "pb" : "muted";
+            return `<div class="row${isMe ? " mine" : d?.rare ? " mate" : ""}">
             ${o("classColor") ? `<span class="cls" style="background:${d?.classColor || "transparent"}"></span>` : ""}
             ${posPill(c.cpos || k + 1)}
             ${o("chg") ? `<span class="chg ${chg > 0 ? "pb" : "bad"}">${chg ? `${chg > 0 ? "▲" : "▼"}${Math.abs(chg)}` : ""}</span>` : ""}
@@ -276,11 +280,32 @@ export function buildClassifica(it: Item): CarView {
             ${o("lic") ? licChip(d) : ""}
             ${o("pits") ? `<span class="pits">${pits.get(c.i) ?? 0}</span>` : ""}
             <span class="gap">${gapTo(c, leader)}</span>
-            ${o("interval") ? `<span class="gap">${k > 0 ? gapTo(c, mine[k - 1]) : dash}</span>` : ""}
+            ${o("interval") ? `<span class="gap">${k > 0 ? gapTo(c, list[k - 1]) : dash}</span>` : ""}
             ${o("last") ? `<span class="t-last">${lapTime(c.last)}</span>` : ""}
             ${o("best") ? `<span class="t-best ${bestCls}">${lapTime(c.best)}</span>` : ""}
             ${o("irDelta") ? `<span class="ird ${irCls(ird.get(c.i))}">${irText(ird.get(c.i))}</span>` : ""}
           </div>`;
+          })
+          .join("");
+      };
+      if (!multi) {
+        const cls = meD?.classId;
+        body.innerHTML = renderClass(sortCls(cars.filter((c) => drivers.has(c.i) && (cls == null || drivers.get(c.i)!.classId === cls))), true);
+        return;
+      }
+      // multiclasse: un blocco per classe, dalla più veloce, con nome e colore della classe
+      const groups = new Map<number, Car[]>();
+      for (const c of cars) {
+        const d = drivers.get(c.i);
+        if (!d) continue;
+        groups.set(d.classId, [...(groups.get(d.classId) ?? []), c]);
+      }
+      const pace = (l: Car[]) => Math.min(...l.map((c) => (c.best > 0 ? c.best : drivers.get(c.i)?.classLap || 1e9)));
+      body.innerHTML = [...groups.entries()]
+        .sort((x, y) => pace(x[1]) - pace(y[1]))
+        .map(([id, l]) => {
+          const d = drivers.get(l[0].i);
+          return `<div class="row clsh"><span class="cls" style="background:${d?.classColor || "transparent"}"></span><span class="d">${esc(d?.className || "Classe")}</span><span class="muted">${l.length} auto</span></div>${renderClass(sortCls(l), id === meD?.classId)}`;
         })
         .join("");
     },

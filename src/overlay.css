@@ -28,6 +28,8 @@ b { font-weight: 700; color: #fff; }
 
 /* Modalità «sposta»: bordo tratteggiato, nome dell'overlay e tutta la finestra trascinabile */
 #drag { position: absolute; inset: 0; z-index: 9; cursor: move; border: 1px dashed var(--purple-300); border-radius: 8px; background: rgb(150 0 255 / .08); }
+#grip { position: absolute; right: 0; bottom: 0; z-index: 10; width: 18px; height: 18px; cursor: nwse-resize; border-radius: 0 0 8px 0;
+  background: linear-gradient(135deg, transparent 50%, var(--rare-main) 50%); }
 #drag span { position: absolute; left: 6px; top: -1px; padding: 1px 6px; border-radius: 0 0 4px 4px; background: var(--rare-main); color: #fff; font: 700 10px Montserrat, sans-serif; text-transform: uppercase; letter-spacing: .08em; pointer-events: none; }
 
 /* Delta */
@@ -40,6 +42,15 @@ b { font-weight: 700; color: #fff; }
 .delta .bar { position: relative; margin: 6px 10px; height: 8px; border-radius: 2px; background: rgb(255 255 255 / .1); }
 .delta .bar i { position: absolute; top: 0; height: 100%; background: var(--lap-pb); }
 .delta .bar em { position: absolute; left: 50%; top: -3px; width: 2px; height: 14px; margin-left: -1px; background: #fff; }
+.rows-panel .row.clsh { gap: 8px; font-size: 11px; padding-top: 5px; color: #fff; }
+.rows-panel .row.clsh .d { letter-spacing: .04em; }
+.relative .row.other-cls { opacity: .72; }
+.relative .cls-tag { font-size: 9px; font-weight: 700; border: 1px solid; border-radius: 3px; padding: 0 4px; margin-left: 4px; color: #fff; white-space: nowrap; }
+.delta .secs { display: flex; gap: 3px; padding: 0 10px 6px; }
+.delta .secs span { flex: 1; text-align: center; font-size: 10px; font-weight: 700; border-radius: 3px; padding: 1px 0; background: rgb(255 255 255 / .08); color: rgb(255 255 255 / .6); font-variant-numeric: tabular-nums; }
+.delta .secs span.pb { background: var(--lap-pb); color: #06210f; }
+.delta .secs span.slow { background: var(--lap-slow); color: #2b2100; }
+.delta .secs span.now { outline: 1px solid #fff; }
 .delta .bottom { display: flex; justify-content: space-between; gap: 8px; padding: 0 10px 6px; font-size: 11px; }
 .delta .bottom:empty { display: none; }
 .delta.only-big .top { padding-bottom: 6px; }

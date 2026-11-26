@@ -89,13 +89,30 @@ function buildDelta(it: Item): View {
   if (o("sector")) bottom.append(sec);
   if (bottom.childElementCount) el.append(bottom);
   else el.classList.add("only-big");
+  // settori del giro: verde = tuo miglior settore, giallo = più lento (con quanto)
+  const secRow = document.createElement("div");
+  secRow.className = "secs";
+  if (o("sectors")) el.append(secRow);
   let sector = -1, sectorStart = 0;
+  let sIdx = -1, sT0 = 0, prevPct = 0, prevCur = 0, nSec = 0;
+  let bestSec: (number | null)[] = [];
+  let lastSec: (number | null)[] = [];
+  const drawSecs = (cur: number) => {
+    secRow.innerHTML = Array.from({ length: nSec }, (_, k) => {
+      const t = lastSec[k], b = bestSec[k];
+      const cls = k === cur ? "now" : t == null ? "" : b != null && t <= b + 0.0005 ? "pb" : "slow";
+      const txt = t == null ? `S${k + 1}` : b != null && t > b + 0.0005 ? `+${(t - b).toFixed(2).replace(".", ",")}` : t.toFixed(1).replace(".", ",");
+      return `<span class="${cls}">${txt}</span>`;
+    }).join("");
+  };
   return {
     el,
     update(f, s) {
-      const r = String(o("reference"));
+      // riserva: con «compagno» ma senza un suo tempo su questa pista e auto, il tuo giro migliore
+      const r0 = String(o("reference"));
+      const r = r0 === "mate" && f.deltaMate == null ? "best" : r0;
       const d = r === "session" ? f.deltaSession : r === "last" ? f.deltaLast : r === "mate" ? f.deltaMate ?? null : f.deltaBest;
-      if (r === "mate" && f.mateName) ref.firstChild!.textContent = `${f.mateName} `;
+      ref.firstChild!.textContent = r === "mate" && f.mateName ? `${f.mateName} ` : r0 === "mate" ? "Migliore (nessun tempo del compagno) " : `${refName} `;
       big.textContent = d == null ? dash : fmtDelta(d);
       big.className = `big d ${tone(d)}`;
       const fill = bar.firstElementChild as HTMLElement;
@@ -124,6 +141,31 @@ function buildDelta(it: Item): View {
         const b = sec.lastElementChild as HTMLElement;
         b.textContent = fmtDelta(sd);
         b.className = tone(sd);
+      }
+      // tempi dei settori: si chiude un settore quando si passa all'inizio del successivo (o al traguardo)
+      if (o("sectors") && starts.length) {
+        if (nSec !== starts.length) {
+          nSec = starts.length;
+          bestSec = Array(nSec).fill(null);
+          lastSec = Array(nSec).fill(null);
+        }
+        const wrapped = f.lapPct < prevPct - 0.5;
+        let k = 0;
+        for (let j = 0; j < starts.length; j++) if (f.lapPct >= starts[j]) k = j;
+        if (sIdx >= 0 && (k !== sIdx || wrapped)) {
+          const end = wrapped ? prevCur : f.lapCur;
+          const t = end - sT0;
+          if (t > 1 && f.onTrack !== false) {
+            lastSec[sIdx] = t;
+            if (bestSec[sIdx] == null || t < bestSec[sIdx]!) bestSec[sIdx] = t;
+          }
+          sT0 = wrapped ? 0 : f.lapCur;
+        }
+        if (sIdx < 0) sT0 = f.lapCur;
+        sIdx = k;
+        prevPct = f.lapPct;
+        prevCur = f.lapCur;
+        drawSecs(k);
       }
     },
   };
@@ -803,6 +845,31 @@ function build() {
     drag.setAttribute("data-tauri-drag-region", "");
     drag.innerHTML = `<span>${DEFS[id]?.name ?? id}</span>`;
     view.el.append(drag);
+    // angolo in basso a destra: trascinalo per ingrandire o rimpicciolire l'overlay
+    const grip = document.createElement("div");
+    grip.id = "grip";
+    grip.title = "Trascina per cambiare la grandezza";
+    grip.addEventListener("pointerdown", (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      grip.setPointerCapture(e.pointerId);
+      const s0 = item(cfg, id).scale, x0 = e.screenX, w0 = Math.max(view!.el.offsetWidth * (s0 / 100), 40);
+      const move = (ev: PointerEvent) => {
+        const s = Math.round(Math.min(300, Math.max(40, (s0 * (w0 + (ev.screenX - x0))) / w0)));
+        if (s === item(cfg, id).scale) return;
+        cfg.items[id] = { ...item(cfg, id), scale: s };
+        $zoom.style.transform = `scale(${s / 100})`;
+        fit();
+      };
+      const up = () => {
+        grip.removeEventListener("pointermove", move);
+        grip.removeEventListener("pointerup", up);
+        if (IN_APP) invoke("overlay_set_scale", { id, scale: item(cfg, id).scale });
+      };
+      grip.addEventListener("pointermove", move);
+      grip.addEventListener("pointerup", up);
+    });
+    view.el.append(grip);
   }
   $zoom.replaceChildren(view.el);
   $zoom.style.transform = `scale(${it.scale / 100})`;

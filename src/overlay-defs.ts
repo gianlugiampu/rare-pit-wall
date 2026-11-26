@@ -20,6 +20,7 @@ export const DEFS: Record<string, Def> = {
       { key: "last", label: "Ultimo giro", def: false },
       { key: "team", label: "Paese o team", def: false },
       { key: "irDelta", label: "iRating guadagnato/perso (stima, in gara)", def: false },
+      { key: "otherClass", label: "Multiclasse: etichetta per le auto di altre classi", def: true },
     ],
     choices: [
       { key: "rows", label: "Auto davanti e dietro", options: [["1", "1 + 1"], ["2", "2 + 2"], ["3", "3 + 3"], ["4", "4 + 4"], ["5", "5 + 5"]], def: "3" },
@@ -41,6 +42,7 @@ export const DEFS: Record<string, Def> = {
     ],
     choices: [
       { key: "rows", label: "Righe", options: [["top", "Primi 3 + intorno a te"], ["all", "Tutta la classe"]], def: "top" },
+      { key: "classes", label: "Classi", options: [["mine", "Solo la tua classe"], ["all", "Tutte le classi (le altre: primi 3)"]], def: "mine" },
       { key: "around", label: "Auto intorno a te", options: [["2", "2 + 2"], ["3", "3 + 3"], ["4", "4 + 4"], ["5", "5 + 5"]], def: "3" },
     ],
   },
@@ -101,6 +103,7 @@ export const DEFS: Record<string, Def> = {
       { key: "current", label: "Giro in corso", def: true },
       { key: "last", label: "Ultimo giro", def: true },
       { key: "sector", label: "Delta del settore", def: true },
+      { key: "sectors", label: "Settori colorati (verde tuo migliore, giallo più lento)", def: true },
     ],
     choices: [
       {
