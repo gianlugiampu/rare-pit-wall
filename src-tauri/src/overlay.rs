@@ -1224,11 +1224,11 @@ fn fetch_iracing_map(dir: std::path::PathBuf, key: String, base: String) {
             _ => String::new(),
         };
         // il verso già capito resta valido se il disegno è della stessa pista
-        let reversed = saved.and_then(|s| s.reversed);
+        let (reversed, dir_v) = saved.map(|s| (s.reversed, s.dir_v)).unwrap_or((None, 0));
         let m = crate::trackmap::TrackMap {
             key: key.clone(),
             points: vec![],
-            svg: Some(crate::trackmap::SvgMap { base, active, finish, etag, reversed }),
+            svg: Some(crate::trackmap::SvgMap { base, active, finish, etag, reversed, dir_v }),
         };
         crate::trackmap::save(&dir, &m);
         if STATE_TRACK.lock().unwrap().as_str() == key {
@@ -1246,6 +1246,7 @@ pub fn overlay_map_dir(reversed: bool) {
     if let Some(m) = cur.as_mut() {
         if let Some(svg) = m.svg.as_mut() {
             svg.reversed = Some(reversed);
+            svg.dir_v = 2;
             if let Some(dir) = MAP_DIR.lock().unwrap().as_ref() {
                 crate::trackmap::save(dir, m);
             }

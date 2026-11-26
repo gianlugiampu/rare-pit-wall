@@ -471,9 +471,10 @@ fn beep(kind: u8, vol: f32) {
         let (tx, rx) = std::sync::mpsc::channel::<(u8, f32)>();
         std::thread::spawn(move || {
             use rodio::Source;
-            let Ok((_stream, handle)) = rodio::OutputStream::try_default() else { return };
+            let mut out = crate::voice::Out::new();
             while let Ok((k, v)) = rx.recv() {
-                let Ok(sink) = rodio::Sink::try_new(&handle) else { continue };
+                let Some(handle) = out.handle() else { continue };
+                let Ok(sink) = rodio::Sink::try_new(handle) else { continue };
                 let tone = |hz: f32, ms: u64| rodio::source::SineWave::new(hz).take_duration(std::time::Duration::from_millis(ms)).amplify(0.25 * v);
                 let gap = || rodio::source::Zero::<f32>::new(1, 44_100).take_duration(std::time::Duration::from_millis(60));
                 match k {

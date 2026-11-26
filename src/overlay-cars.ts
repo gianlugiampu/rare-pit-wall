@@ -327,11 +327,36 @@ export type TrackMap = {
 };
 let trackMap: TrackMap | null = null;
 /** con il disegno di iRacing: i punti nei due versi di percorrenza (dal traguardo) */
-let svgDirs: { fwd: [number, number][]; rev: [number, number][] } | null = null;
+let svgDirs: { fwd: [number, number][]; rev: [number, number][]; cw: boolean } | null = null;
 let mapVersion = 0;
 
-/** Punti del disegno di iRacing: tracciato misurato con il browser, partenza dal traguardo, y verso l'alto */
-function svgToDirs(active: string, finish: string): { fwd: [number, number][]; rev: [number, number][] } | null {
+/** Senso di marcia vero delle piste (cercato online il 26/11/2026), per numero iRacing della pista: true = orario.
+ *  Suzuka (a otto) non c'è: lì il verso si capisce guidando. */
+const KNOWN_CW: Record<number, boolean> = {
+  498: true, // Mugello
+  266: false, // Imola
+  239: true, // Monza
+  489: false, // Lédenon
+  523: true, // Spa
+  229: false, // Circuit of the Americas
+  515: true, 516: true, // Navarra
+  445: true, // Fuji
+  413: true, // Hungaroring
+  179: true, // Long Beach
+  195: true, // Motegi
+  449: true, // Oschersleben
+  219: false, // Mount Panorama (Bathurst)
+  249: true, // Nordschleife
+  166: true, // Okayama
+  341: true, // Silverstone
+  324: true, // Tsukuba
+  435: true, // Watkins Glen
+};
+
+/** Punti del disegno di iRacing, partenza dal traguardo, y verso l'alto.
+ *  Molti disegni sono una «striscia» piena: due bordi (esterno e interno) in versi opposti nello stesso tracciato.
+ *  Si prende un bordo solo, il più lungo (0.35: prima si usavano tutti e due e metà delle auto andava al contrario). */
+function svgToDirs(active: string, finish: string): { fwd: [number, number][]; rev: [number, number][]; cw: boolean } | null {
   const mount = (text: string) => {
     const host = document.createElement("div");
     host.style.cssText = "position:absolute;left:-99999px;top:0;width:1920px;height:1080px;visibility:hidden;pointer-events:none";
@@ -343,7 +368,6 @@ function svgToDirs(active: string, finish: string): { fwd: [number, number][]; r
     [...host.querySelectorAll("path,polyline,polygon,line,rect,circle,ellipse")].filter((e) => !e.closest("defs")) as SVGGeometryElement[];
   const a = mount(active), f = mount(finish || "<svg></svg>");
   try {
-    // il tracciato è la forma più lunga del disegno
     let line: SVGGeometryElement | null = null, L = 0;
     for (const e of shapes(a)) {
       const l = e.getTotalLength?.() ?? 0;
@@ -351,28 +375,53 @@ function svgToDirs(active: string, finish: string): { fwd: [number, number][]; r
     }
     if (!line || L < 50) return null;
     const ctm = line.getCTM();
-    const at = (l: number): [number, number] => {
-      let p = line!.getPointAtLength(((l % L) + L) % L);
+    const K = 4000, step = L / K;
+    const raw: [number, number][] = Array.from({ length: K }, (_, k) => {
+      let p = line!.getPointAtLength(k * step);
       if (ctm) p = p.matrixTransform(ctm);
       return [p.x, p.y];
-    };
-    // traguardo: il centro del disegno della linea, e il punto del tracciato più vicino
-    let off = 0;
+    });
+    // pezzi continui: un salto grande tra due punti vicini = inizio di un altro bordo
+    const dist = (p: [number, number], q: [number, number]) => Math.hypot(p[0] - q[0], p[1] - q[1]);
+    const jump = step * 6 * Math.abs(ctm?.a || 1) + 1;
+    const chunks: [number, number][][] = [];
+    let cur: [number, number][] = [raw[0]];
+    for (let k = 1; k < K; k++) {
+      if (dist(raw[k - 1], raw[k]) > jump) { chunks.push(cur); cur = []; }
+      cur.push(raw[k]);
+    }
+    chunks.push(cur);
+    const lenOf = (c: [number, number][]) => c.reduce((acc, p, i) => acc + (i ? dist(c[i - 1], p) : 0), 0);
+    const loop = chunks.reduce((best, c) => (lenOf(c) > lenOf(best) ? c : best));
+    if (loop.length < 20) return null;
+    // traguardo: punto del bordo più vicino al centro del disegno della linea
+    let s0 = 0;
     const fin = shapes(f)[0];
     if (fin) {
-      const b = fin.getBBox(), m = fin.getCTM();
-      let c = new DOMPoint(b.x + b.width / 2, b.y + b.height / 2);
+      const bb = fin.getBBox(), m = fin.getCTM();
+      let c = new DOMPoint(bb.x + bb.width / 2, bb.y + bb.height / 2);
       if (m) c = c.matrixTransform(m);
       let best = Infinity;
-      for (let k = 0; k < 2000; k++) {
-        const [x, y] = at((k / 2000) * L);
-        const d = (x - c.x) ** 2 + (y - c.y) ** 2;
-        if (d < best) { best = d; off = (k / 2000) * L; }
-      }
+      loop.forEach((p, i) => { const d = (p[0] - c.x) ** 2 + (p[1] - c.y) ** 2; if (d < best) { best = d; s0 = i; } });
     }
+    // giro chiuso, ricampionato a passi uguali partendo dal traguardo
+    const cum = [0];
+    for (let i = 1; i <= loop.length; i++) cum.push(cum[i - 1] + dist(loop[i - 1], loop[i % loop.length]));
+    const T = cum[loop.length];
+    const pointAt = (d: number): [number, number] => {
+      d = ((d % T) + T) % T;
+      let lo = 0, hi = loop.length;
+      while (hi - lo > 1) { const mid = (lo + hi) >> 1; if (cum[mid] <= d) lo = mid; else hi = mid; }
+      const p = loop[lo], q = loop[(lo + 1) % loop.length], t = (d - cum[lo]) / Math.max(cum[lo + 1] - cum[lo], 1e-9);
+      return [p[0] + (q[0] - p[0]) * t, -(p[1] + (q[1] - p[1]) * t)];
+    };
     const N = 400;
-    const pts = (dir: number) => Array.from({ length: N }, (_, k) => { const [x, y] = at(off + dir * (k / N) * L); return [x, -y] as [number, number]; });
-    return { fwd: pts(1), rev: pts(-1) };
+    const pts = (dir: number) => Array.from({ length: N }, (_, k) => pointAt(cum[s0] + dir * (k / N) * T));
+    const fwd = pts(1);
+    // verso del disegno: area con segno (y verso l'alto) negativa = orario
+    let area = 0;
+    for (let i = 0; i < N; i++) { const p = fwd[i], q = fwd[(i + 1) % N]; area += p[0] * q[1] - q[0] * p[1]; }
+    return { fwd, rev: pts(-1), cw: area < 0 };
   } finally {
     a.remove();
     f.remove();
@@ -384,16 +433,23 @@ export function setMap(m: TrackMap | null) {
   dirTrack = null;
   if (m?.svg?.active) {
     svgDirs = svgToDirs(m.svg.active, m.svg.finish);
-    if (svgDirs) m = { ...m, points: m.svg.reversed ? svgDirs.rev : svgDirs.fwd };
+    if (svgDirs) {
+      // pista con il senso di marcia conosciuto: niente da indovinare
+      const known = KNOWN_CW[parseInt(m.key, 10)];
+      const reversed = known != null ? svgDirs.cw !== known : m.svg.reversed;
+      m = { ...m, points: reversed ? svgDirs.rev : svgDirs.fwd, svg: { ...m.svg, reversed: reversed ?? null } };
+    }
   }
   trackMap = m && m.points?.length > 10 ? m : null;
   mapVersion++;
 }
 
 // ——— Verso di percorrenza del disegno di iRacing: si capisce dalla tua auto ———
-// Mentre guidi si somma di quanto gira l'auto (Yaw) in un tratto con curve; si confronta con quanto gira il disegno nello
-// stesso tratto nei due versi: vince il verso che somiglia di più. Si decide una volta e si salva per quella pista.
-let dirTrack: { p0: number; last: number; lastPct: number; turn: number } | null = null;
+// Mentre guidi si segna quanto ha girato l'auto (Yaw) lungo un terzo di giro. Lo stesso andamento si calcola sul
+// disegno nei due versi: vince il verso le cui curve somigliano di più, punto per punto e con la direzione
+// (destra/sinistra). Il segno di iRacing si prova in tutti e due i modi, ma uguale per i due versi.
+// Se la differenza non è netta si riprova nel tratto dopo. Si decide una volta e si salva per quella pista (0.35).
+let dirTrack: { p0: number; last: number; lastPct: number; turn: number; samples: [number, number][] } | null = null;
 const turning = (pts: [number, number][], from: number, span: number) => {
   const n = pts.length, i0 = Math.floor(from * n), steps = Math.max(2, Math.floor(span * n));
   let t = 0, prev: number | null = null;
@@ -405,6 +461,27 @@ const turning = (pts: [number, number][], from: number, span: number) => {
   }
   return t;
 };
+/** Sceglie il verso: andamento delle curve dell'auto (span, giro cumulato) contro il disegno. null = non è chiaro */
+export function pickDirection(fwd: [number, number][], rev: [number, number][], p0: number, samples: [number, number][]): boolean | null {
+  const span = samples[samples.length - 1][0];
+  const carAt = (x: number) => {
+    let k = 0;
+    while (k < samples.length - 1 && samples[k + 1][0] < x) k++;
+    const [s0, t0] = samples[k], [s1, t1] = samples[Math.min(k + 1, samples.length - 1)];
+    return s1 > s0 ? t0 + ((x - s0) / (s1 - s0)) * (t1 - t0) : t0;
+  };
+  const J = 12;
+  const car = Array.from({ length: J }, (_, j) => carAt((span * (j + 1)) / J));
+  const prof = (pts: [number, number][]) => Array.from({ length: J }, (_, j) => turning(pts, p0, (span * (j + 1)) / J));
+  const pf = prof(fwd), pr = prof(rev);
+  const err = (p: number[], sign: number) => p.reduce((acc, v, j) => acc + (v - sign * car[j]) ** 2, 0);
+  // il segno dello Yaw è uno solo per i due versi: si prende quello che spiega meglio la guida
+  const sign = Math.min(err(pf, 1), err(pr, 1)) <= Math.min(err(pf, -1), err(pr, -1)) ? 1 : -1;
+  const ef = err(pf, sign), er = err(pr, sign);
+  if (ef < er * 0.4) return false;
+  if (er < ef * 0.4) return true;
+  return null;
+}
 function learnDirection(pct: number, yaw: number, onTrack: boolean, setting: string) {
   if (!trackMap?.svg || !svgDirs) return;
   // scelta a mano nelle impostazioni
@@ -415,24 +492,24 @@ function learnDirection(pct: number, yaw: number, onTrack: boolean, setting: str
   }
   if (trackMap.svg.reversed != null) return;
   if (!onTrack) { dirTrack = null; return; }
-  if (!dirTrack) { dirTrack = { p0: pct, last: yaw, lastPct: pct, turn: 0 }; return; }
+  if (!dirTrack) { dirTrack = { p0: pct, last: yaw, lastPct: pct, turn: 0, samples: [[0, 0]] }; return; }
   let span = pct - dirTrack.p0;
   if (span < 0) span += 1;
   const back = pct < dirTrack.lastPct - 0.01 && !(dirTrack.lastPct > 0.9 && pct < 0.1);
-  if (back || span > 0.5) { dirTrack = null; return; }
+  if (back || span > 0.6) { dirTrack = null; return; }
   let dy = yaw - dirTrack.last;
   while (dy > Math.PI) dy -= 2 * Math.PI;
   while (dy < -Math.PI) dy += 2 * Math.PI;
   dirTrack.turn += dy;
   dirTrack.last = yaw;
   dirTrack.lastPct = pct;
-  if (Math.abs(dirTrack.turn) < 1.2 || span < 0.02) return;
-  // confronto nei due versi (anche con il segno opposto, per non dipendere da come iRacing misura lo Yaw)
-  const score = (pts: [number, number][]) => { const t = turning(pts, dirTrack!.p0, span); return Math.min(Math.abs(t - dirTrack!.turn), Math.abs(t + dirTrack!.turn)); };
-  const rev = score(svgDirs.rev) < score(svgDirs.fwd);
+  if (span > dirTrack.samples[dirTrack.samples.length - 1][0]) dirTrack.samples.push([span, dirTrack.turn]);
+  if (span < 0.33) return;
+  const rev = pickDirection(svgDirs.fwd, svgDirs.rev, dirTrack.p0, dirTrack.samples);
+  dirTrack = null;
+  if (rev == null) return; // non è chiaro: si riprova dal punto in cui sei
   trackMap = { ...trackMap, points: rev ? svgDirs.rev : svgDirs.fwd, svg: { ...trackMap.svg, reversed: rev } };
   mapVersion++;
-  dirTrack = null;
   onDirection?.(rev);
 }
 let onDirection: ((rev: boolean) => void) | null = null;

@@ -38,6 +38,9 @@ pub struct SvgMap {
     /// verso di percorrenza ricavato dalla tua auto (None = non ancora capito)
     #[serde(default)]
     pub reversed: Option<bool>,
+    /// 2 = verso capito con il metodo della 0.35 (i vecchi si ricalcolano)
+    #[serde(default)]
+    pub dir_v: u8,
 }
 
 const ASSETS: &str = "https://members-assets.iracing.com/public/track-maps";
@@ -149,7 +152,13 @@ fn path(dir: &PathBuf, key: &str) -> PathBuf {
 }
 
 fn read(p: PathBuf) -> Option<TrackMap> {
-    std::fs::read_to_string(p).ok().and_then(|s| serde_json::from_str(&s).ok())
+    let mut m: TrackMap = std::fs::read_to_string(p).ok().and_then(|s| serde_json::from_str(&s).ok())?;
+    if let Some(svg) = m.svg.as_mut() {
+        if svg.dir_v < 2 {
+            svg.reversed = None;
+        }
+    }
+    Some(m)
 }
 
 /// Mappa salvata sul PC: prima il disegno di iRacing, poi quello dal giro

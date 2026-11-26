@@ -133,13 +133,41 @@ impl Piper {
     }
 }
 
+/// Uscita audio che segue le cuffie di Windows: se il dispositivo predefinito cambia (es. AirPods collegate
+/// dopo l'avvio del programma) si riapre sul nuovo. Va creata e usata nello stesso thread.
+pub struct Out {
+    name: Option<String>,
+    stream: Option<(rodio::OutputStream, rodio::OutputStreamHandle)>,
+}
+
+impl Out {
+    pub fn new() -> Self {
+        Out { name: None, stream: None }
+    }
+
+    fn default_name() -> Option<String> {
+        use rodio::cpal::traits::{DeviceTrait, HostTrait};
+        rodio::cpal::default_host().default_output_device().and_then(|d| d.name().ok())
+    }
+
+    pub fn handle(&mut self) -> Option<&rodio::OutputStreamHandle> {
+        let now = Self::default_name();
+        if self.stream.is_none() || now != self.name {
+            self.stream = None; // chiude prima il vecchio
+            self.stream = rodio::OutputStream::try_default().ok();
+            self.name = now;
+        }
+        self.stream.as_ref().map(|(_, h)| h)
+    }
+}
+
 fn worker(mut child: Child, mut stdin: ChildStdin, stdout: ChildStdout, rx: Receiver<(String, f32)>, speaking: Arc<AtomicBool>) {
     let mut lines = BufReader::new(stdout).lines();
-    let audio = rodio::OutputStream::try_default().ok();
+    let mut out = Out::new();
     for (text, volume) in rx {
         let ok = writeln!(stdin, "{text}").and_then(|_| stdin.flush()).is_ok();
         let path = if ok { lines.next().and_then(|l| l.ok()) } else { None };
-        if let (Some(path), Some((_, handle))) = (path, audio.as_ref()) {
+        if let (Some(path), Some(handle)) = (path, out.handle()) {
             let p = PathBuf::from(path.trim());
             if let (Ok(file), Ok(sink)) = (std::fs::File::open(&p), rodio::Sink::try_new(handle)) {
                 if let Ok(src) = rodio::Decoder::new_wav(std::io::BufReader::new(file)) {
