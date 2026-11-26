@@ -228,10 +228,6 @@ b { font-weight: 700; color: #fff; }
 body.light *, body.light *::before, body.light *::after { animation: none !important; transition: none !important; }
 
 /* Coach in overlay (bozza v1 approvata il 25/11/2026) */
-.curve { width: 520px; }
-.cv-hd { display: flex; justify-content: space-between; align-items: center; gap: 12px; height: 22px; padding: 0 8px; background: rgb(150 0 255 / .22); font-size: 11px; white-space: nowrap; }
-.cv-hd .d { color: #fff; letter-spacing: .06em; }
-.cv-row { display: grid; gap: 3px; padding: 6px 8px 8px; }
 .cv { border-radius: 4px; padding: 3px 0 4px; text-align: center; background: rgb(255 255 255 / .06); }
 .cv small { display: block; font-size: 9px; color: var(--ink-400); }
 .cv b { font-size: 12px; }
@@ -265,3 +261,16 @@ body.light *, body.light *::before, body.light *::after { animation: none !impor
 body.night #zoom { filter: brightness(.68) saturate(.85); }
 body.night .panel { background: rgb(4 2 6 / var(--bg-a)); }
 
+
+/* Meteo e pista */
+.meteo { width: 240px; }
+.mt-hd { display: flex; justify-content: space-between; align-items: center; height: 22px; padding: 0 8px; background: rgb(150 0 255 / .22); font-size: 11px; }
+.mt-hd .d { color: #fff; letter-spacing: .06em; }
+.mt-hd .dw { color: #5ec8ff; font-weight: 700; font-size: 10px; }
+.mt-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; padding: 6px 8px 8px; font-size: 11px; }
+.mt-grid div { display: flex; justify-content: space-between; gap: 6px; white-space: nowrap; }
+.mt-grid b { color: #fff; font-variant-numeric: tabular-nums; }
+.mt-grid b.rain { color: #5ec8ff; }
+.mt-grid i { font-style: normal; display: inline-block; }
+.mt-grid i.up { color: var(--lap-invalid); font-size: 9px; }
+.mt-grid i.dn { color: #5ec8ff; font-size: 9px; }

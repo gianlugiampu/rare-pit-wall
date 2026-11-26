@@ -19,7 +19,8 @@ type Slow = {
   session: string; lap: number; lapsRemain: number | null; timeRemain: number | null;
   lastLap: number | null; bestLap: number | null; sessionBest: number | null;
   fuel: number; fuelMax: number | null; fuelAvg: number | null; fuelLast: number | null;
-  incidents: number; incLimit: number | null; trackTemp: number | null; airTemp: number | null; flags: number; sectors: number[]; trackLenM?: number | null;
+  incidents: number; incLimit: number | null; trackTemp: number | null; airTemp: number | null; flags: number;
+  wetness?: number; declaredWet?: boolean; precip?: number | null; skies?: number; windVel?: number | null; windDir?: number | null; humidity?: number | null; sectors: number[]; trackLenM?: number | null;
   sessionState: number; lapsTotal: number | null; me: number; driversRev: number; mapRev: number; mapProgress: number | null;
 };
 type Frame = { fast: Fast; slow?: Slow; cars?: Car[] };
@@ -535,36 +536,55 @@ const demoCoach = (t: number): CoachView => {
     next: { n: 7, distM: ph < 0.7 ? Math.round(200 - ph * 280) : 0, now: ph >= 0.7, gear: 3, minSpd: 92, lastDiffM: -6 },
   };
 };
-const sgn = (x: number) => `${x > 0 ? "+" : x < 0 ? "−" : ""}${Math.abs(x).toFixed(2).replace(".", ",")}`;
 function coachOf(f: Fast): CoachView | null {
   return f.coach ?? (cfg.edit || !IN_APP ? demoCoach(performance.now()) : null);
 }
-function buildCurve(it: Item): View {
-  const o = (k: string) => opt(it, "curve", k);
+// ——— Meteo e pista (idea scelta il 26/11/2026) ———
+const SKIES = ["Sereno", "Poco nuvoloso", "Nuvoloso", "Coperto"];
+const WET = ["", "Asciutta", "Quasi asciutta", "Appena umida", "Umida", "Bagnata", "Molto bagnata", "Allagata"];
+function buildMeteo(it: Item): View {
+  const o = (k: string) => opt(it, "meteo", k);
   const el = document.createElement("div");
-  el.className = "panel curve tab";
-  const body = document.createElement("div");
-  el.append(body);
+  el.className = "panel meteo tab";
+  el.innerHTML = `<div class="mt-hd"><span class="d">METEO E PISTA</span><span class="dw"></span></div><div class="mt-grid"></div>`;
+  const grid = el.querySelector(".mt-grid") as HTMLElement;
+  const dw = el.querySelector(".dw") as HTMLElement;
+  // temperatura della pista negli ultimi 10 minuti, per la freccia
+  const hist: [number, number][] = [];
+  const arrow = (now: number | null) => {
+    if (now == null || !o("trend")) return "";
+    const t = Date.now();
+    hist.push([t, now]);
+    while (hist.length && t - hist[0][0] > 600000) hist.shift();
+    const d = now - hist[0][1];
+    return Math.abs(d) < 0.8 ? "" : d > 0 ? ` <i class="up">▲</i>` : ` <i class="dn">▼</i>`;
+  };
   return {
     el,
-    update(f) {
-      const c = coachOf(f);
-      el.hidden = !c || !c.loss.length;
-      if (!c || el.hidden) return;
-      const best = Math.min(...c.loss.filter((x): x is number => x != null));
-      const ref = c.who ? `contro ${esc(c.who)}` : "contro il tuo migliore";
-      const tot = o("total") && c.total != null ? ` · giro in corso <b class="${c.total < 0 ? "pb" : "bad"}">${sgn(c.total)}</b>` : "";
-      const cells = c.loss
-        .map((l, i) => {
-          const cls = l == null ? "todo" : l === best && l < 0 ? "p" : l < 0 ? "g" : "r";
-          return `<div class="cv ${cls}${i === c.cur ? " now" : ""}"><small>C${i + 1}</small><b>${l == null ? dash : sgn(l)}</b></div>`;
-        })
-        .join("");
-      const html = `<div class="cv-hd"><span class="d">CURVE</span><span>${ref}${tot}</span></div><div class="cv-row" style="grid-template-columns:repeat(${c.loss.length},1fr)">${cells}</div>`;
-      // si riscrive solo il contenuto: la maniglia per spostare l'overlay («sposta») deve restare
-      if (html !== body.dataset.html) {
-        body.dataset.html = html;
-        body.innerHTML = html;
+    update(f, s) {
+      if (!s) return;
+      const cell = (k: string, v: string, cls = "") => `<div><span class="muted">${k}</span><b class="${cls}">${v}</b></div>`;
+      const cells: string[] = [
+        cell("Pista", s.trackTemp != null ? `${Math.round(s.trackTemp)}°${arrow(s.trackTemp)}` : dash),
+        cell("Aria", s.airTemp != null ? `${Math.round(s.airTemp)}°` : dash),
+      ];
+      if (o("sky")) {
+        cells.push(cell("Cielo", SKIES[s.skies ?? -1] ?? dash));
+        const p = s.precip ?? 0;
+        cells.push(cell("Pioggia", p > 0.005 ? `${Math.round(p * 100)}%` : "No", p > 0.005 ? "rain" : ""));
+      }
+      if (o("wet")) cells.push(cell("Pista", WET[s.wetness ?? 0] || dash, (s.wetness ?? 0) >= 4 ? "rain" : ""));
+      if (o("wind") && s.windVel != null) {
+        // freccia: da dove soffia rispetto al muso della tua auto (in alto = vento contro)
+        const rel = ((s.windDir ?? 0) - (f.yaw ?? 0)) * (180 / Math.PI);
+        cells.push(cell("Vento", `${Math.round(s.windVel * 3.6)} km/h <i class="wind" style="transform:rotate(${Math.round(rel + 180)}deg)">↑</i>`));
+      }
+      if (o("humidity") && s.humidity != null) cells.push(cell("Umidità", `${Math.round(s.humidity * 100)}%`));
+      dw.textContent = s.declaredWet ? "BAGNATO DICHIARATO" : "";
+      const html = cells.join("");
+      if (html !== grid.dataset.html) {
+        grid.dataset.html = html;
+        grid.innerHTML = html;
       }
     },
   };
@@ -787,7 +807,7 @@ const BUILDERS: Record<string, (it: Item) => View> = {
   delta: buildDelta, sessione: buildSessione, benzina: buildBenzina, pedali: buildPedali,
   relative: carView(buildRelative), classifica: carView(buildClassifica),
   radar: buildRadar, box: buildBox, stratega: buildStratega, bandiere: buildBandiere,
-  curve: buildCurve, frenata: buildFrenata, tracce: buildTracce,
+  frenata: buildFrenata, tracce: buildTracce, meteo: buildMeteo,
   mappa: (it) => {
     const v = buildMappa(it);
     return {
@@ -814,7 +834,7 @@ function demo(t: number): Frame {
     },
     slow: {
       session: "Race", lap: 14, lapsRemain: 6, timeRemain: 640, lastLap: 105.6, bestLap: 105.39, sessionBest: 105.21,
-      fuel: 22.4, fuelMax: 45, fuelAvg: 2.61, fuelLast: 2.58, incidents: 4, incLimit: 17, trackTemp: 31.2, airTemp: 22.4, flags: 0x20,
+      fuel: 22.4, fuelMax: 45, fuelAvg: 2.61, fuelLast: 2.58, incidents: 4, incLimit: 17, trackTemp: 31.2, airTemp: 22.4, flags: 0x20, wetness: 2, declaredWet: false, precip: 0.1, skies: 2, windVel: 4.2, windDir: 1.2, humidity: 0.62,
       sectors: [0, 0.33, 0.66], sessionState: 4, lapsTotal: 20, me: 5, driversRev: -1, mapRev: -1, mapProgress: null,
     },
     cars: demoCars(t),

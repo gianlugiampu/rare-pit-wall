@@ -42,13 +42,14 @@ pub const KINDS: &[Kind] = &[
     kind("pedali", "Pedali", (340.0, 74.0), (0.66, 0.86)),
     kind("mappa", "Mappa", (230.0, 170.0), (0.1, 0.55)),
     // Coach in overlay (bozza v1 approvata il 25/11/2026), spenti di base
-    Kind { on: false, ..kind("curve", "Curve", (520.0, 64.0), (0.5, 0.78)) },
     Kind { on: false, ..kind("frenata", "Frenata", (320.0, 72.0), (0.5, 0.62)) },
     Kind { on: false, ..kind("tracce", "Gas e freno", (340.0, 100.0), (0.3, 0.86)) },
     // P10: Bandiere grandi senza scritte (bozza v3 approvata il 25/11/2026), spento di base
     Kind { on: false, ..kind("bandiere", "Bandiere", (120.0, 90.0), (0.5, 0.22)) },
     // P13: Stratega (bozza v1 approvata il 25/11/2026), spento di base: si accende dalla scheda Overlay
     Kind { on: false, ..kind("stratega", "Stratega", (330.0, 150.0), (0.84, 0.42)) },
+    // Meteo e pista (idea scelta il 26/11/2026), spento di base
+    Kind { on: false, ..kind("meteo", "Meteo e pista", (240.0, 120.0), (0.9, 0.22)) },
     // P8.4: box del pit wall (spento di base, compare solo quando arriva un messaggio) e radar a luci
     Kind { on: false, ..kind("box", "Box del pit wall", (330.0, 34.0), (0.16, 0.34)) },
     // radar a barre: due barre ai lati della tua auto, spostabili e ridimensionabili (scelta di Gianluca del 24/11/2026)
@@ -519,6 +520,14 @@ struct Slow {
     inc_limit: Option<i32>,
     track_temp: Option<f32>,
     air_temp: Option<f32>,
+    /// meteo: bagnato della pista (0–7 di iRacing), pioggia (0–1), cielo (0–3), vento (m/s e direzione in radianti), umidità (0–1)
+    wetness: i32,
+    declared_wet: bool,
+    precip: Option<f32>,
+    skies: i32,
+    wind_vel: Option<f32>,
+    wind_dir: Option<f32>,
+    humidity: Option<f32>,
     flags: u32,
     sectors: Vec<f32>,
     /// P8.3: stato della sessione (4 = gara in corso), giri totali, la tua auto, versione dell'elenco piloti
@@ -857,6 +866,13 @@ fn start_reader(app: AppHandle) {
                         slow.incidents = s.get("PlayerCarMyIncidentCount").map(|v| v.as_i32()).unwrap_or(0);
                         slow.track_temp = s.get("TrackTempCrew").or_else(|| s.get("TrackTemp")).map(|v| v.as_f64() as f32);
                         slow.air_temp = s.get("AirTemp").map(|v| v.as_f64() as f32);
+                        slow.wetness = s.get("TrackWetness").map(|v| v.as_i32()).unwrap_or(0);
+                        slow.declared_wet = s.get("WeatherDeclaredWet").map(|v| v.as_bool()).unwrap_or(false);
+                        slow.precip = s.get("Precipitation").map(|v| v.as_f64() as f32);
+                        slow.skies = s.get("Skies").map(|v| v.as_i32()).unwrap_or(-1);
+                        slow.wind_vel = s.get("WindVel").map(|v| v.as_f64() as f32);
+                        slow.wind_dir = s.get("WindDir").map(|v| v.as_f64() as f32);
+                        slow.humidity = s.get("RelativeHumidity").map(|v| v.as_f64() as f32);
                         slow.flags = s.get("SessionFlags").map(|v| v.as_i32() as u32).unwrap_or(0);
                         slow.session_state = s.get("SessionState").map(|v| v.as_i32()).unwrap_or(0);
                         slow.laps_total = s.get("SessionLapsTotal").map(|v| v.as_i32()).filter(|v| *v > 0 && *v < 32000);

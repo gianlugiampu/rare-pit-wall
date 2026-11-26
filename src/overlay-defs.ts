@@ -74,12 +74,6 @@ export const DEFS: Record<string, Def> = {
       { key: "big", label: "Resta grande", options: [["3", "3 secondi"], ["4", "4 secondi"], ["6", "6 secondi"], ["10", "10 secondi"]], def: "4" },
     ],
   },
-  curve: {
-    name: "Curve",
-    desc: "Coach: guadagno o perdita curva per curva sul riferimento (tuo migliore o compagno, scelto nella scheda Voce). Verde guadagni, rosso perdi, viola la migliore.",
-    defOn: false,
-    fields: [{ key: "total", label: "Totale del giro in corso", def: true }],
-  },
   frenata: {
     name: "Frenata",
     desc: "Coach: prima di ogni curva la barra si riempie fino al punto di frenata del riferimento, poi «Frena ora». I bip 3-2-1 si scelgono nella scheda Voce.",
@@ -153,6 +147,17 @@ export const DEFS: Record<string, Def> = {
       { key: "cars", label: "Auto", options: [["all", "Tutte"], ["mine", "Solo la tua classe"]], def: "all" },
       { key: "rotate", label: "Ruota", options: [["0", "No"], ["90", "90°"], ["180", "180°"], ["270", "270°"]], def: "0" },
       { key: "mirror", label: "Specchia", options: [["no", "No"], ["si", "Sì"]], def: "no" },
+    ],
+  },
+  meteo: {
+    name: "Meteo e pista",
+    desc: "Temperature di pista e aria (con la freccia se salgono o scendono), cielo, pioggia, quanto è bagnata la pista e il vento rispetto alla tua auto.",
+    fields: [
+      { key: "trend", label: "Freccia della temperatura (ultimi 10 minuti)", def: true },
+      { key: "sky", label: "Cielo e pioggia", def: true },
+      { key: "wet", label: "Pista asciutta o bagnata", def: true },
+      { key: "wind", label: "Vento rispetto alla tua auto", def: true },
+      { key: "humidity", label: "Umidità", def: false },
     ],
   },
   sessione: {
