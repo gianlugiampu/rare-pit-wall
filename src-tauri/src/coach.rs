@@ -19,12 +19,16 @@ pub struct Lap {
     pub thr: Vec<f64>,
     pub brk: Vec<f64>,
     pub gear: Vec<f64>,
+    /// sterzo in radianti (positivo = a sinistra, verificato sui giri del sito); vuoto se manca
+    pub steer: Vec<f64>,
 }
 
 impl Lap {
     pub fn from_json(v: &serde_json::Value) -> Option<Lap> {
         let arr = |k: &str| -> Option<Vec<f64>> { v.get(k)?.as_array()?.iter().map(|x| x.as_f64()).collect() };
-        let l = Lap { n: v.get("n")?.as_u64()? as usize, len_m: v.get("lenM")?.as_f64()?, t: arr("t")?, spd: arr("spd")?, thr: arr("thr")?, brk: arr("brk")?, gear: arr("gear")? };
+        let n = v.get("n")?.as_u64()? as usize;
+        let steer = arr("str").filter(|a| a.len() == n).unwrap_or_default();
+        let l = Lap { n, len_m: v.get("lenM")?.as_f64()?, t: arr("t")?, spd: arr("spd")?, thr: arr("thr")?, brk: arr("brk")?, gear: arr("gear")?, steer };
         (l.n >= 50 && [&l.t, &l.spd, &l.thr, &l.brk, &l.gear].iter().all(|a| a.len() == l.n)).then_some(l)
     }
 }
@@ -49,6 +53,9 @@ pub fn mate_delta(pct: f32, lap_cur: f32) -> Option<(f32, f32, String)> {
     let t = lap.t[i] + (lap.t[i + 1] - lap.t[i]) * f;
     Some(((lap_cur as f64 - t) as f32, *lap.t.last()? as f32, name.clone()))
 }
+
+/// Modalità Scoperta (scelta di Gianluca del 26/11/2026): in prova, prima di ogni curva, verso, marcia e frenata
+pub static DISCOVER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// V3 · ultimo consiglio dato (per «dove perdo tempo?»)
 pub static LAST: Mutex<Option<String>> = Mutex::new(None);
@@ -257,6 +264,9 @@ pub struct ZonePlan {
     pub gear: i64,
     pub t_s: f64,
     pub t_e: f64,
+    /// Modalità Scoperta: (punto del giro da cui contare l'anticipo, frase). Più frasi se la curva ha più frenate
+    /// (es. Villeneuve e Tosa a Imola, unite dal Coach): «Curva 2 a destra, quarta, frena» · «poi a sinistra, seconda, frena forte»
+    pub calls: Vec<(f64, String)>,
 }
 
 pub struct Plan {
@@ -290,10 +300,123 @@ fn build_plan(lap: Lap, who: String, rev: u32) -> Plan {
             let r = b.and_then(|b| first(b, z.e + 1, |k| lap.brk[k] < BRAKE_ON));
             let min_spd = lap.spd[z.s..=z.e].iter().cloned().fold(f64::MAX, f64::min);
             let gear = lap.gear[z.s..=z.e].iter().cloned().filter(|g| *g > 0.0).fold(f64::MAX, f64::min);
-            ZonePlan { s: f(z.s), e: f(z.e), brake: b.map(f), release: r.map(f), min_spd, gear: if gear < 20.0 { gear as i64 } else { 0 }, t_s: lap.t[z.s], t_e: lap.t[z.e] }
+            let gear = if gear < 20.0 { gear as i64 } else { 0 };
+            let peak = lap.brk[look..=z.e].iter().cloned().fold(0.0, f64::max);
+            let min_thr = lap.thr[z.s..=z.e].iter().cloned().fold(f64::MAX, f64::min);
+            let _ = (peak, min_thr);
+            (ZonePlan { s: f(z.s), e: f(z.e), brake: b.map(f), release: r.map(f), min_spd, gear, t_s: lap.t[z.s], t_e: lap.t[z.e], calls: vec![] }, z.s, z.e)
+        })
+        .enumerate()
+        .map(|(i, (mut zp, s, e))| {
+            zp.calls = discover_calls(&lap, i + 1, s, e).into_iter().map(|(k, t)| (f(k), t)).collect();
+            zp
         })
         .collect();
     Plan { rev, who, len_m: lap.len_m, lap, zones }
+}
+
+/// Verso della curva dallo sterzo del riferimento: «a destra», «a sinistra», «esse sinistra destra» (vuoto se non si sa)
+fn turn_words(lap: &Lap, s: usize, e: usize) -> String {
+    if lap.steer.len() != lap.n {
+        return String::new();
+    }
+    // tratti con lo sterzo dalla stessa parte, con il loro peso
+    // soglia relativa al giro: lo sterzo può arrivare in radianti (programma) o in gradi (Garage61)
+    let scale = lap.steer.iter().fold(0.0f64, |m, x| m.max(x.abs()));
+    // (verso, peso, sterzata massima): le curvette leggere (sotto un terzo della sterzata più forte del giro) non contano
+    let mut runs: Vec<(i8, f64, f64)> = vec![];
+    for &a in &lap.steer[s..=e] {
+        if a.abs() < scale * 0.08 {
+            continue;
+        }
+        let sg = if a > 0.0 { 1 } else { -1 };
+        match runs.last_mut() {
+            Some(r) if r.0 == sg => {
+                r.1 += a.abs();
+                r.2 = r.2.max(a.abs());
+            }
+            _ => runs.push((sg, a.abs(), a.abs())),
+        }
+    }
+    runs.retain(|r| r.2 >= scale * 0.33);
+    let total: f64 = runs.iter().map(|r| r.1).sum();
+    let mut big: Vec<i8> = vec![];
+    for r in runs.iter().filter(|r| r.1 >= total * 0.2) {
+        if big.last() != Some(&r.0) {
+            big.push(r.0);
+        }
+    }
+    let w = |s: i8| if s > 0 { "sinistra" } else { "destra" };
+    match big.as_slice() {
+        [] => String::new(),
+        [a] => format!("a {}", w(*a)),
+        [a, b, ..] => format!("esse {} {}", w(*a), w(*b)),
+    }
+}
+
+const MARCE: [&str; 9] = ["", "prima", "seconda", "terza", "quarta", "quinta", "sesta", "settima", "ottava"];
+
+/// Modalità Scoperta: «Curva 3 a destra, terza, frena forte» · «Curva 4 a sinistra, in pieno»
+pub fn discover_line(n: usize, dir: &str, gear: i64, peak_brake: f64, min_thr: f64) -> String {
+    let mut s = format!("Curva {n}");
+    if !dir.is_empty() {
+        s.push(' ');
+        s.push_str(dir);
+    }
+    let flat = peak_brake < BRAKE_ON && min_thr >= FULL_GAS;
+    if flat {
+        s.push_str(", in pieno");
+        return s;
+    }
+    if let Some(g) = MARCE.get(gear as usize).filter(|g| !g.is_empty()) {
+        s.push_str(", ");
+        s.push_str(g);
+    }
+    s.push_str(if peak_brake >= 65.0 {
+        ", frena forte"
+    } else if peak_brake >= 30.0 {
+        ", frena"
+    } else if peak_brake >= BRAKE_ON {
+        ", solo un tocco di freno"
+    } else {
+        ", alza il piede"
+    });
+    s
+}
+
+/// Modalità Scoperta: le frasi di una curva del Coach, una per ogni frenata (o rilascio) separata da gas pieno
+fn discover_calls(lap: &Lap, n: usize, s: usize, e: usize) -> Vec<(usize, String)> {
+    // inizio di ogni pezzo: prima frenata/rilascio, poi ogni nuova frenata dopo un tratto a gas pieno
+    let mut starts: Vec<usize> = vec![];
+    let mut gas_since = true;
+    for k in s.max(1)..=e {
+        if lap.thr[k] >= FULL_GAS && lap.brk[k] < BRAKE_ON {
+            gas_since = true;
+        }
+        let begins = (lap.brk[k] >= BRAKE_ON && lap.brk[k - 1] < BRAKE_ON) || (lap.thr[k] < 40.0 && lap.thr[k - 1] >= 40.0);
+        if begins && gas_since {
+            starts.push(k);
+            gas_since = false;
+        }
+    }
+    if starts.is_empty() {
+        starts.push(s);
+    }
+    let mut out = vec![];
+    for (j, &a) in starts.iter().enumerate() {
+        let b = starts.get(j + 1).map(|x| x - 1).unwrap_or(e);
+        let peak = lap.brk[a..=b].iter().cloned().fold(0.0, f64::max);
+        let min_thr = lap.thr[a..=b].iter().cloned().fold(f64::MAX, f64::min);
+        let gear = lap.gear[a..=b].iter().cloned().filter(|g| *g > 0.0).fold(f64::MAX, f64::min);
+        let gear = if gear < 20.0 { gear as i64 } else { 0 };
+        let dir = turn_words(lap, a, b);
+        let mut line = discover_line(n, &dir, gear, peak, min_thr);
+        if j > 0 {
+            line = line.replacen(&format!("Curva {n}"), "poi", 1).replace("poi, ", "poi ");
+        }
+        out.push((a, line));
+    }
+    out
 }
 
 static PLAN: Mutex<Option<(String, std::sync::Arc<Plan>)>> = Mutex::new(None);
@@ -394,10 +517,22 @@ impl Live {
         let lt = lap_cur as f64;
         let len = plan.len_m;
         let (on, sessions, vol) = *BEEP.lock().unwrap();
+        let discover = DISCOVER.load(std::sync::atomic::Ordering::Relaxed) && on_track && session == 0;
         let beeps = on && on_track && sessions.get(session).copied().unwrap_or(false);
         let mut next: Option<NextBrake> = None;
         let mut cur = -1;
         for (i, zp) in plan.zones.iter().enumerate() {
+            // Modalità Scoperta: la frase della curva circa 3 secondi prima del punto di frenata
+            if discover && len > 0.0 {
+                let lead = (speed_kmh as f64 / 3.6) * 3.0 + 40.0;
+                for (at, line) in &zp.calls {
+                    let tp = (at - lead / len).rem_euclid(1.0);
+                    let crossed = if pct >= self.last_pct { self.last_pct < tp && pct >= tp } else { tp > self.last_pct || tp <= pct };
+                    if crossed {
+                        crate::say_text(line);
+                    }
+                }
+            }
             if self.last_pct < zp.s && pct >= zp.s {
                 self.entry[i] = Some(lt);
             }
@@ -608,5 +743,41 @@ mod tests_plan {
         let v = live.step(&plan, bp + 0.001, 10.5, 0.5, 150.0, true, 0);
         assert_eq!(train_line(3, Some(4.4), 2.4), "Curva 3: frenata 4 metri dopo, minima 2 chilometri orari più alta");
         assert!(v.next.unwrap().now);
+    }
+
+    /// Prova manuale: RPW_LAP_JSON = file con la telemetria di un giro (formato del sito)
+    #[test]
+    #[ignore]
+    fn scoperta_giro_vero() {
+        let v: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(std::env::var("RPW_LAP_JSON").unwrap()).unwrap()).unwrap();
+        let plan = build_plan(Lap::from_json(&v).unwrap(), String::new(), 1);
+        for z in &plan.zones {
+            for (at, line) in &z.calls {
+                println!("{:>5.0} m · {}", at * plan.len_m, line);
+            }
+        }
+    }
+
+    #[test]
+    fn scoperta() {
+        assert_eq!(discover_line(3, "a destra", 3, 80.0, 0.0), "Curva 3 a destra, terza, frena forte");
+        assert_eq!(discover_line(4, "a sinistra", 5, 0.0, 100.0), "Curva 4 a sinistra, in pieno");
+        assert_eq!(discover_line(7, "", 4, 20.0, 10.0), "Curva 7, quarta, solo un tocco di freno");
+        // verso dallo sterzo: positivo = sinistra
+        let mut l = super::tests::lap_for_tests(200, 0.0);
+        l.steer = (0..l.n).map(|i| if (200..240).contains(&i) { -0.4 } else { 0.0 }).collect();
+        let plan = build_plan(l, String::new(), 1);
+        assert_eq!(plan.zones[0].calls.len(), 1);
+        assert_eq!(plan.zones[0].calls[0].1, "Curva 1 a destra, seconda, frena forte");
+        // in prova la frase arriva prima del punto di frenata
+        DISCOVER.store(true, std::sync::atomic::Ordering::Relaxed);
+        let mut live = Live::default();
+        let bp = plan.zones[0].brake.unwrap() as f32;
+        live.step(&plan, bp - 0.05, 10.0, 0.0, 200.0, true, 0);
+        live.step(&plan, bp - 0.02, 11.0, 0.0, 200.0, true, 0);
+        DISCOVER.store(false, std::sync::atomic::Ordering::Relaxed);
+        let mut esse = super::tests::lap_for_tests(200, 0.0);
+        esse.steer = (0..esse.n).map(|i| if (200..215).contains(&i) { 0.5 } else if (215..235).contains(&i) { -0.5 } else { 0.0 }).collect();
+        assert_eq!(turn_words(&esse, 190, 240), "esse sinistra destra");
     }
 }

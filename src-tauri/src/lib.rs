@@ -1204,6 +1204,7 @@ fn install_voice(app: AppHandle, shared: tauri::State<Arc<Shared>>) {
 fn set_engineer(app: AppHandle, shared: tauri::State<Arc<Shared>>, settings: engineer::Settings) {
     *shared.engineer.lock().unwrap() = settings.clone();
     *coach::PREF.lock().unwrap() = settings.coach_ref.clone();
+    coach::DISCOVER.store(settings.discover, std::sync::atomic::Ordering::Relaxed);
     *coach::BEEP.lock().unwrap() = (settings.beep, [settings.beep_practice, settings.beep_quali, settings.beep_race], settings.volume as f32 / 100.0);
     let mut c = load_config(&app);
     let wants_serena = settings.enabled && matches!(settings.voice.as_deref(), None | Some(voice::SERENA));
@@ -1284,6 +1285,7 @@ fn settings_restore(app: AppHandle, shared: tauri::State<Arc<Shared>>) -> Result
     if let Some(e) = v.get("ingegnere").and_then(|e| serde_json::from_value::<engineer::Settings>(e.clone()).ok()) {
         *shared.engineer.lock().unwrap() = e.clone();
         *coach::PREF.lock().unwrap() = e.coach_ref.clone();
+        coach::DISCOVER.store(e.discover, std::sync::atomic::Ordering::Relaxed);
         c.engineer = e;
     }
     if let Some(m) = v.get("microfono").and_then(|m| m.as_str()) {
@@ -1508,6 +1510,7 @@ pub fn run() {
                 *shared.voice_status.lock().unwrap() = voice::VoiceStatus { state: "pronta".into(), percent: 100, message: "Voce Serena pronta".into() };
             }
             *coach::PREF.lock().unwrap() = eng_settings.coach_ref.clone();
+            coach::DISCOVER.store(eng_settings.discover, std::sync::atomic::Ordering::Relaxed);
             *coach::BEEP.lock().unwrap() = (eng_settings.beep, [eng_settings.beep_practice, eng_settings.beep_quali, eng_settings.beep_race], eng_settings.volume as f32 / 100.0);
             *shared.engineer.lock().unwrap() = eng_settings;
             // P6b: cartella dati per l'elenco delle clip e ffmpeg

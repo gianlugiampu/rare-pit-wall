@@ -78,10 +78,10 @@ async function loadMoments() {
   }
 }
 
-type EngSettings = { enabled: boolean; voice: string | null; volume: number; fuel: boolean; laptime: boolean; gaps: boolean; flags: boolean; race: boolean; strategy: boolean; coach: boolean; coachRef: string; beep: boolean; beepPractice: boolean; beepQuali: boolean; beepRace: boolean; autoPit: boolean; autoPitTyres: string; autoPitMargin: number };
+type EngSettings = { enabled: boolean; voice: string | null; volume: number; fuel: boolean; laptime: boolean; gaps: boolean; flags: boolean; race: boolean; strategy: boolean; coach: boolean; coachRef: string; beep: boolean; beepPractice: boolean; beepQuali: boolean; beepRace: boolean; autoPit: boolean; autoPitTyres: string; autoPitMargin: number; discover: boolean };
 type VoiceStatus = { state: string; percent: number; message: string };
 type EngState = { settings: EngSettings; voices: { id: string; name: string }[]; voiceStatus: VoiceStatus };
-const FLAGS = ["enabled", "laptime", "fuel", "gaps", "flags", "race", "strategy", "coach", "beep"] as const;
+const FLAGS = ["enabled", "laptime", "fuel", "gaps", "flags", "race", "strategy", "coach", "beep", "discover"] as const;
 const BEEPS = [["beepPractice", "e-beep-practice"], ["beepQuali", "e-beep-quali"], ["beepRace", "e-beep-race"]] as const;
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
