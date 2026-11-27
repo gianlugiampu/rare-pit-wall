@@ -1,6 +1,7 @@
 // P8 · Pagina di un overlay (una per finestra). Riceve i dati da Rare Pit Wall 60 volte al secondo e li disegna.
 // Aperta in un browser normale (anteprima per lo sviluppo) usa dati finti: overlay.html?id=delta&edit=1
 
+import "flag-icons/css/flag-icons.min.css";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow, LogicalSize } from "@tauri-apps/api/window";

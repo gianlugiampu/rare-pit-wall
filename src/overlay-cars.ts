@@ -67,6 +67,41 @@ function lapTime(s: number | null | undefined): string {
   const sec = (s - m * 60).toFixed(m ? 2 : 3).padStart(m ? 5 : 6, "0");
   return m ? `${m}:${sec}` : sec;
 }
+// ——— Bandierine della nazionalità (richiesta di Gianluca del 27/11/2026, libreria flag-icons, MIT) ———
+// iRacing dà il paese come nome inglese (FlairName, es. «Italy»): si trova la sigla ISO con i nomi dei paesi del browser.
+const norm = (x: string) => x.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z]/g, "");
+const FLAG_ALIAS: Record<string, string> = {
+  usa: "us", unitedstatesofamerica: "us", uk: "gb", greatbritain: "gb", england: "gb-eng", scotland: "gb-sct", wales: "gb-wls",
+  northernireland: "gb-nir", korea: "kr", southkorea: "kr", russia: "ru", czechrepublic: "cz", czechia: "cz", turkey: "tr", turkiye: "tr",
+  holland: "nl", bosnia: "ba", macedonia: "mk", taiwan: "tw", hongkong: "hk", vietnam: "vn", iran: "ir", ivorycoast: "ci",
+};
+const OLD_CODES = new Set(["DD", "FX", "UK", "SU", "YU", "CS", "ZR", "TP", "BU", "NT", "AN", "QO", "EA", "EZ", "UN", "IC", "DG", "CP", "TA", "AC"]);
+let flagMap: Map<string, string> | null = null;
+export function flagCode(name: string): string | null {
+  if (!name) return null;
+  if (!flagMap) {
+    flagMap = new Map();
+    try {
+      const dn = new Intl.DisplayNames(["en"], { type: "region" });
+      for (let a = 65; a <= 90; a++)
+        for (let b = 65; b <= 90; b++) {
+          const code = String.fromCharCode(a, b);
+          const n = dn.of(code);
+          // le sigle vecchie (Germania Est, URSS, «UK»…) non hanno la bandiera: si saltano
+          if (n && n !== code && !OLD_CODES.has(code) && !flagMap.has(norm(n))) flagMap.set(norm(n), code.toLowerCase());
+        }
+    } catch {
+      /* senza nomi dei paesi: niente bandiere */
+    }
+  }
+  const k = norm(name);
+  return FLAG_ALIAS[k] ?? flagMap.get(k) ?? null;
+}
+const flagHtml = (d: { flair?: string } | undefined) => {
+  const c = d?.flair ? flagCode(d.flair) : null;
+  return c ? `<span class="fi fi-${c} flag" title="${esc(d!.flair!)}"></span>` : `<span class="flag none"></span>`;
+};
+
 // distacco sempre con un decimale, anche sopra i 10 secondi (richiesta di Gianluca del 26/11/2026)
 const gapText = (g: number) => Math.abs(g).toFixed(1);
 
@@ -180,14 +215,14 @@ export function buildRelative(it: Item): CarView {
           const d = drivers.get(c.i);
           const isMe = tone === "me";
           const nameCls = isMe ? "me" : d?.rare ? "rare" : tone;
-          const extra = o("team") ? `<span class="team">${esc(d?.team && d.team !== d.full ? d.team : d?.flair ?? "")}</span>` : "";
+          const extra = o("team") && d?.team && d.team !== d.full ? `<span class="team">${esc(d.team)}</span>` : "";
           // multiclasse: le auto di un'altra classe hanno l'etichetta della classe e sono un po' più chiare
           const other = !!(o("otherClass") && meD && d && d.classId !== meD.classId);
           return `<div class="row${isMe ? " mine" : d?.rare ? " mate" : ""}${other ? " other-cls" : ""}">
             ${o("classColor") ? `<span class="cls" style="background:${d?.classColor || "transparent"}"></span>` : ""}
             ${posPill(c.cpos || c.pos)}
             <span class="num d">${esc(d?.number ?? "")}</span>
-            <span class="name ${nameCls}">${esc(d?.name ?? "")}</span>${extra}${other && d ? `<span class="cls-tag" style="border-color:${d.classColor || "#888"}">${esc(d.className)}</span>` : ""}
+            ${o("flag") ? flagHtml(d) : ""}<span class="name ${nameCls}">${esc(d?.name ?? "")}</span>${extra}${other && d ? `<span class="cls-tag" style="border-color:${d.classColor || "#888"}">${esc(d.className)}</span>` : ""}
             <span class="pit-slot">${c.pit ? `<span class="pit">PIT</span>` : ""}</span>
             ${o("lic") ? licChip(d) : ""}
             ${o("last") ? `<span class="t-last">${lapTime(c.last)}</span>` : ""}
@@ -276,7 +311,7 @@ export function buildClassifica(it: Item): CarView {
             ${posPill(c.cpos || k + 1)}
             ${o("chg") ? `<span class="chg ${chg > 0 ? "pb" : "bad"}">${chg ? `${chg > 0 ? "▲" : "▼"}${Math.abs(chg)}` : ""}</span>` : ""}
             <span class="num d">${esc(d?.number ?? "")}</span>
-            <span class="name ${isMe ? "me" : d?.rare ? "rare" : ""}">${esc(d?.name ?? "")}</span>
+            ${o("flag") ? flagHtml(d) : ""}<span class="name ${isMe ? "me" : d?.rare ? "rare" : ""}">${esc(d?.name ?? "")}</span>
             <span class="pit-slot">${c.pit ? `<span class="pit">PIT</span>` : ""}</span>
             ${o("lic") ? licChip(d) : ""}
             ${o("pits") ? `<span class="pits">${pits.get(c.i) ?? 0}</span>` : ""}
@@ -329,7 +364,7 @@ export function demoDrivers(): Drivers {
     list: DEMO_NAMES.map((full, i) => ({
       idx: i, full, name: `${full[0]}. ${full.split(" ").slice(1).join(" ")}`, number: String([7, 12, 41, 22, 14, 28, 3, 31, 98, 55, 77, 19, 64, 8][i]),
       classId: 1, className: "F4", classColor: "#f5c242", classLap: 105, lic: DEMO_LIC[i][0], sr: DEMO_LIC[i][1], irating: DEMO_LIC[i][2],
-      team: "", flair: "Italy", rare: i === 8,
+      team: "", flair: ["Italy", "France", "Germany", "United States", "Italy", "Italy", "United Kingdom", "Portugal", "Morocco", "Sweden", "Poland", "Norway", "Czechia", "Russia"][i % 14], rare: i === 8,
     })),
   };
 }
