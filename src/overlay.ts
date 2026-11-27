@@ -11,7 +11,7 @@ type Fast = {
   connected: boolean; onTrack: boolean; throttle: number; brake: number; clutch: number; steer: number; steerMax: number;
   gear: number; speedKmh: number; rpm: number; lapPct: number; lapCur: number;
   deltaBest: number | null; deltaSession: number | null; deltaLast: number | null; carLr: number; yaw: number;
-  deltaMate?: number | null; mateLap?: number | null; mateName?: string | null;
+  deltaMate?: number | null; mateLap?: number | null; mateName?: string | null; deltaAlltime?: number | null; alltimeLap?: number | null;
   coach?: CoachView | null;
   night?: boolean;
 };
@@ -19,7 +19,7 @@ type Slow = {
   session: string; lap: number; lapsRemain: number | null; timeRemain: number | null;
   lastLap: number | null; bestLap: number | null; sessionBest: number | null;
   fuel: number; fuelMax: number | null; fuelAvg: number | null; fuelLast: number | null;
-  incidents: number; incLimit: number | null; trackTemp: number | null; airTemp: number | null; flags: number;
+  incidents: number; incLimit: number | null; brakeBias?: number | null; trackTemp: number | null; airTemp: number | null; flags: number;
   wetness?: number; declaredWet?: boolean; precip?: number | null; skies?: number; windVel?: number | null; windDir?: number | null; humidity?: number | null; sectors: number[]; trackLenM?: number | null;
   sessionState: number; lapsTotal: number | null; me: number; driversRev: number; mapRev: number; mapProgress: number | null;
 };
@@ -70,7 +70,12 @@ function buildDelta(it: Item): View {
   top.className = "top";
   const est = span(`Stimato <b>${dash}</b>`, "muted");
   const big = span(dash, "big d");
-  const refName = { best: "Migliore", session: "Sessione", last: "Ultimo", mate: "Compagno" }[String(o("reference"))] ?? "Migliore";
+  const refName = { best: "Migliore", session: "Sessione", last: "Ultimo", mate: "Compagno", alltime: "Di sempre" }[String(o("reference"))] ?? "Migliore";
+  // scritta in alto: quale delta stai guardando
+  const TITLE: Record<string, string> = { best: "Tuo migliore della sessione", session: "Migliore della sessione (tutti)", last: "Tuo ultimo giro", mate: "Compagno più veloce", alltime: "Tuo migliore di sempre" };
+  const title = document.createElement("div");
+  title.className = "dl-title";
+  if (o("title")) el.append(title);
   const ref = span(`${refName} <b class="best">${dash}</b>`, "muted");
   if (o("estimate")) top.append(est); else top.append(span(""));
   top.append(big);
@@ -115,9 +120,12 @@ function buildDelta(it: Item): View {
     update(f, s) {
       // riserva: con «compagno» ma senza un suo tempo su questa pista e auto, il tuo giro migliore
       const r0 = String(o("reference"));
-      const r = r0 === "mate" && f.deltaMate == null ? "best" : r0;
-      const d = r === "session" ? f.deltaSession : r === "last" ? f.deltaLast : r === "mate" ? f.deltaMate ?? null : f.deltaBest;
-      ref.firstChild!.textContent = r === "mate" && f.mateName ? `${f.mateName} ` : r0 === "mate" ? "Migliore (nessun tempo del compagno) " : `${refName} `;
+      // riserva: senza tempo del compagno o senza il tuo migliore di sempre sul sito, il tuo migliore della sessione
+      const r = (r0 === "mate" && f.deltaMate == null) || (r0 === "alltime" && f.deltaAlltime == null) ? "best" : r0;
+      const d = r === "session" ? f.deltaSession : r === "last" ? f.deltaLast : r === "mate" ? f.deltaMate ?? null : r === "alltime" ? f.deltaAlltime ?? null : f.deltaBest;
+      ref.firstChild!.textContent = r === "mate" && f.mateName ? `${f.mateName} ` : r !== r0 ? "Migliore " : `${refName} `;
+      const tt = `DELTA · ${TITLE[r] ?? TITLE.best}${r === "mate" && f.mateName ? ` (${f.mateName})` : ""}${r !== r0 ? ` · ${r0 === "mate" ? "nessun tempo del compagno" : "nessun tuo tempo sul sito"}` : ""}`;
+      if (title.textContent !== tt) title.textContent = tt;
       big.textContent = d == null ? dash : fmtDelta(d);
       big.className = `big d ${tone(d)}`;
       const fill = bar.firstElementChild as HTMLElement;
@@ -126,7 +134,7 @@ function buildDelta(it: Item): View {
       fill.style.left = d != null && d < 0 ? `${50 - w}%` : "50%";
       fill.style.background = d != null && d < 0 ? "var(--lap-pb)" : "var(--lap-invalid)";
       if (s) {
-        const refTime = r === "session" ? s.sessionBest : r === "last" ? s.lastLap : r === "mate" ? f.mateLap ?? null : s.bestLap;
+        const refTime = r === "session" ? s.sessionBest : r === "last" ? s.lastLap : r === "mate" ? f.mateLap ?? null : r === "alltime" ? f.alltimeLap ?? null : s.bestLap;
         (ref.lastElementChild as HTMLElement).textContent = lapTime(refTime);
         (est.lastElementChild as HTMLElement).textContent = refTime && d != null ? lapTime(refTime + d) : dash;
         (last.lastElementChild as HTMLElement).textContent = lapTime(s.lastLap);
@@ -204,11 +212,12 @@ function buildSessione(it: Item): View {
   const parts: Record<string, HTMLSpanElement> = {
     end: span(`<span class="muted">Fine</span> <b>${dash}</b>`),
     incidents: span(`<span class="muted">Inc</span> <b>${dash}</b>`),
+    bias: span(`<span class="muted">Freni</span> <b>${dash}</b>`),
     track: span(`<span class="muted">Pista</span> <b>${dash}</b>`),
     air: span(`<span class="muted">Aria</span> <b>${dash}</b>`),
     clock: span(`<b>${dash}</b>`),
   };
-  for (const k of ["end", "incidents", "track", "air", "clock"]) if (o(k)) el.append(parts[k]);
+  for (const k of ["end", "incidents", "bias", "track", "air", "clock"]) if (o(k)) el.append(parts[k]);
   const flag = span("", "flag");
   flag.style.marginLeft = "auto";
   flag.hidden = true;
@@ -222,6 +231,7 @@ function buildSessione(it: Item): View {
       if (!s) return;
       set("end", s.lapsRemain != null ? (s.lapsRemain <= 1 ? "ultimo giro" : `${s.lapsRemain} giri`) : s.timeRemain != null ? clock(s.timeRemain) : dash);
       set("incidents", f.connected ? `${s.incidents}x${s.incLimit ? `/${s.incLimit}` : ""}` : dash);
+      set("bias", s.brakeBias != null ? `${s.brakeBias.toFixed(1).replace(".", ",")}%` : dash);
       set("track", s.trackTemp != null ? `${Math.round(s.trackTemp)}°` : dash);
       set("air", s.airTemp != null ? `${Math.round(s.airTemp)}°` : dash);
       const fl = FLAGS.find(([bits]) => s.flags & bits);
@@ -834,7 +844,7 @@ function demo(t: number): Frame {
     },
     slow: {
       session: "Race", lap: 14, lapsRemain: 6, timeRemain: 640, lastLap: 105.6, bestLap: 105.39, sessionBest: 105.21,
-      fuel: 22.4, fuelMax: 45, fuelAvg: 2.61, fuelLast: 2.58, incidents: 4, incLimit: 17, trackTemp: 31.2, airTemp: 22.4, flags: 0x20, wetness: 2, declaredWet: false, precip: 0.1, skies: 2, windVel: 4.2, windDir: 1.2, humidity: 0.62,
+      fuel: 22.4, fuelMax: 45, fuelAvg: 2.61, fuelLast: 2.58, incidents: 4, incLimit: 17, trackTemp: 31.2, airTemp: 22.4, brakeBias: 54.5, flags: 0x20, wetness: 2, declaredWet: false, precip: 0.1, skies: 2, windVel: 4.2, windDir: 1.2, humidity: 0.62,
       sectors: [0, 0.33, 0.66], sessionState: 4, lapsTotal: 20, me: 5, driversRev: -1, mapRev: -1, mapProgress: null,
     },
     cars: demoCars(t),

@@ -108,6 +108,11 @@ pub fn on_shortcut_released(_app: &AppHandle, sc: &tauri_plugin_global_shortcut:
 pub fn run(app: &AppHandle, action: &str) {
     match action {
         "delta" => crate::overlay::cycle_delta(app),
+        "delta_best" => crate::overlay::set_delta(app, "best"),
+        "delta_session" => crate::overlay::set_delta(app, "session"),
+        "delta_last" => crate::overlay::set_delta(app, "last"),
+        "delta_mate" => crate::overlay::set_delta(app, "mate"),
+        "delta_alltime" => crate::overlay::set_delta(app, "alltime"),
         "parla" => crate::ascolto::start(),
         "segna" => crate::MARK.store(true, std::sync::atomic::Ordering::Relaxed),
         "chiama" => {

@@ -52,6 +52,7 @@ b { font-weight: 700; color: #fff; }
 .delta .cvs span.r { background: var(--lap-invalid); }
 .delta .cvs span.p { background: var(--rare-main); }
 .delta .cvs span.now { outline: 1.5px solid #fff; }
+.delta .dl-title { padding: 5px 10px 0; font-size: 9px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase; color: var(--purple-300); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .delta .secs { display: flex; gap: 3px; padding: 0 10px 6px; }
 .delta .secs span { flex: 1; text-align: center; font-size: 10px; font-weight: 700; border-radius: 3px; padding: 1px 0; background: rgb(255 255 255 / .08); color: rgb(255 255 255 / .6); font-variant-numeric: tabular-nums; }
 .delta .secs span.s-pb { background: var(--lap-pb); color: #06210f !important; }

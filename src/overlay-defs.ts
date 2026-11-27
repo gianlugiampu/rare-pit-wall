@@ -91,6 +91,7 @@ export const DEFS: Record<string, Def> = {
     name: "Delta",
     desc: "Quanto sei avanti o indietro rispetto al giro di riferimento, con la barra verde/rossa.",
     fields: [
+      { key: "title", label: "Scritta in alto: quale delta stai guardando", def: true },
       { key: "bar", label: "Barra del delta", def: true },
       { key: "estimate", label: "Tempo stimato del giro", def: true },
       { key: "ref", label: "Tempo di riferimento", def: true },
@@ -105,10 +106,11 @@ export const DEFS: Record<string, Def> = {
         key: "reference",
         label: "Confronta con",
         options: [
-          ["best", "Il tuo giro migliore"],
-          ["session", "Il migliore della sessione"],
+          ["best", "Il tuo migliore della sessione"],
+          ["session", "Il migliore della sessione (tutti)"],
           ["last", "Il tuo ultimo giro"],
           ["mate", "Il compagno più veloce (dal sito)"],
+          ["alltime", "Il tuo migliore di sempre (dal sito)"],
         ],
         def: "best",
       },
@@ -162,14 +164,15 @@ export const DEFS: Record<string, Def> = {
   },
   sessione: {
     name: "Sessione",
-    desc: "Una riga con giri o tempo alla fine, incidenti, temperature, bandiera e ora.",
+    desc: "Una riga con gli incidenti e la ripartizione di frenata. Si possono aggiungere giri alla fine, temperature, bandiera e ora.",
     fields: [
-      { key: "end", label: "Giri o tempo alla fine", def: true },
       { key: "incidents", label: "Incidenti (x / limite)", def: true },
-      { key: "track", label: "Temperatura della pista", def: true },
-      { key: "air", label: "Temperatura dell'aria", def: true },
-      { key: "flag", label: "Bandiera", def: true },
-      { key: "clock", label: "Ora", def: true },
+      { key: "bias", label: "Ripartizione di frenata (auto che la regolano dall'abitacolo)", def: true },
+      { key: "end", label: "Giri o tempo alla fine", def: false },
+      { key: "track", label: "Temperatura della pista", def: false },
+      { key: "air", label: "Temperatura dell'aria", def: false },
+      { key: "flag", label: "Bandiera", def: false },
+      { key: "clock", label: "Ora", def: false },
     ],
   },
   benzina: {

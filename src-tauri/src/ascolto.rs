@@ -45,6 +45,20 @@ pub const FRASI: &[(&str, &str)] = &[
     ("come vado", "tempi"),
     ("cambia delta", "delta"),
     ("delta", "delta"),
+    // un comando per ogni riferimento del delta (richiesta di Gianluca del 27/11/2026)
+    ("delta migliore", "delta_best"),
+    ("delta giro migliore", "delta_best"),
+    ("delta mio migliore", "delta_best"),
+    ("delta sessione", "delta_session"),
+    ("delta migliore della sessione", "delta_session"),
+    ("delta degli altri", "delta_session"),
+    ("delta ultimo giro", "delta_last"),
+    ("delta ultimo", "delta_last"),
+    ("delta compagno", "delta_mate"),
+    ("delta sul compagno", "delta_mate"),
+    ("delta di sempre", "delta_alltime"),
+    ("delta migliore di sempre", "delta_alltime"),
+    ("delta record", "delta_alltime"),
     // V2
     ("compagno", "compagno"),
     ("distacco dal compagno", "compagno"),
@@ -419,6 +433,9 @@ mod tests {
         assert_eq!(action_of("quanta benzina ho"), Some("benzina"));
         assert_eq!(action_of("chi ho dietro"), Some("distacchi"));
         assert_eq!(action_of("cambia delta"), Some("delta"));
+        assert_eq!(action_of("delta compagno"), Some("delta_mate"));
+        assert_eq!(action_of("delta di sempre"), Some("delta_alltime"));
+        assert_eq!(action_of("delta ultimo giro"), Some("delta_last"));
         assert_eq!(action_of("pizza"), None);
         assert_eq!(resample(&[0.0; 48_000], 48_000).len(), 16_000);
     }

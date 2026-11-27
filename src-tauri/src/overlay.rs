@@ -449,36 +449,47 @@ pub fn toggle_edit(app: &AppHandle) {
     set_edit(app, on);
 }
 
-/// Comando rapido: riferimento del delta a giro (tuo migliore → migliore della sessione → ultimo giro)
-pub fn cycle_delta(app: &AppHandle) {
-    let (s, next) = {
-        let mut st = STATE.lock().unwrap();
-        let mut it = st.settings.item("delta");
-        let cur = it.opts.get("reference").and_then(|v| v.as_str()).unwrap_or("best").to_string();
-        let next = match cur.as_str() {
-            "best" => "session",
-            "session" => "last",
-            "last" => "mate",
-            _ => "best",
-        };
-        if !it.opts.is_object() {
-            it.opts = serde_json::json!({});
-        }
-        it.opts["reference"] = serde_json::json!(next);
-        st.settings.items.insert("delta".into(), it);
-        (st.settings.clone(), next)
-    };
-    save(app, &s);
-    sync(app);
-    let name = match next {
+/// Nome del riferimento del delta, come lo dice Serena
+pub fn delta_name(which: &str) -> &'static str {
+    match which {
         "session" => "Delta sul migliore della sessione",
         "last" => "Delta sul tuo ultimo giro",
         "mate" => "Delta sul compagno più veloce",
-        _ => "Delta sul tuo giro migliore",
+        "alltime" => "Delta sul tuo migliore di sempre",
+        _ => "Delta sul tuo migliore della sessione",
+    }
+}
+
+/// Riferimento del delta scelto (comando rapido o a voce): best, session, last, mate, alltime
+pub fn set_delta(app: &AppHandle, which: &str) {
+    let s = {
+        let mut st = STATE.lock().unwrap();
+        let mut it = st.settings.item("delta");
+        if !it.opts.is_object() {
+            it.opts = serde_json::json!({});
+        }
+        it.opts["reference"] = serde_json::json!(which);
+        st.settings.items.insert("delta".into(), it);
+        st.settings.clone()
     };
+    save(app, &s);
+    sync(app);
     // lo dice anche la voce, così si sa cosa si sta guardando senza staccare gli occhi dalla pista
     *crate::ASK.lock().unwrap() = None;
-    crate::say_text(name);
+    crate::say_text(delta_name(which));
+}
+
+/// Comando rapido: riferimento del delta a giro (tuo migliore → sessione → ultimo giro → compagno → migliore di sempre)
+pub fn cycle_delta(app: &AppHandle) {
+    let cur = STATE.lock().unwrap().settings.item("delta").opts.get("reference").and_then(|v| v.as_str()).unwrap_or("best").to_string();
+    let next = match cur.as_str() {
+        "best" => "session",
+        "session" => "last",
+        "last" => "mate",
+        "mate" => "alltime",
+        _ => "best",
+    };
+    set_delta(app, next);
 }
 
 pub fn toggle_hidden(app: &AppHandle) {
@@ -518,6 +529,9 @@ struct Fast {
     /// P11: delta sul giro del compagno più veloce (stessa pista e auto), il suo tempo e il nome
     delta_mate: Option<f32>,
     mate_lap: Option<f32>,
+    /// delta sul tuo giro migliore di sempre (dal sito)
+    delta_alltime: Option<f32>,
+    alltime_lap: Option<f32>,
     mate_name: Option<String>,
     /// CarLeftRight: 2 auto a sinistra, 3 a destra, 4 ai due lati, 5 due a sinistra, 6 due a destra
     car_lr: i32,
@@ -543,6 +557,8 @@ struct Slow {
     fuel_avg: Option<f32>,
     fuel_last: Option<f32>,
     incidents: i32,
+    /// ripartizione di frenata (dcBrakeBias), solo per le auto che la regolano dall'abitacolo
+    brake_bias: Option<f32>,
     inc_limit: Option<i32>,
     track_temp: Option<f32>,
     air_temp: Option<f32>,
@@ -796,6 +812,10 @@ fn start_reader(app: AppHandle) {
                         fast.mate_lap = Some(lap);
                         fast.mate_name = Some(name);
                     }
+                    if let Some((d, lap)) = crate::coach::alltime_delta(fast.lap_pct, fast.lap_cur) {
+                        fast.delta_alltime = Some(d);
+                        fast.alltime_lap = Some(lap);
+                    }
                     fast.car_lr = s.get("CarLeftRight").map(|v| v.as_i32()).unwrap_or(0);
                     fast.cam = s.get("CamCarIdx").map(|v| v.as_i32()).unwrap_or(-1);
                     // P8.6: con la Mappa aperta e la pista non ancora disegnata, si registra il giro
@@ -894,6 +914,7 @@ fn start_reader(app: AppHandle) {
                         slow.session_best = (best < f32::MAX).then_some(best);
                         slow.fuel = f(s, "FuelLevel");
                         slow.incidents = s.get("PlayerCarMyIncidentCount").map(|v| v.as_i32()).unwrap_or(0);
+                        slow.brake_bias = s.get("dcBrakeBias").map(|v| v.as_f64() as f32).filter(|v| *v > 0.0);
                         slow.track_temp = s.get("TrackTempCrew").or_else(|| s.get("TrackTemp")).map(|v| v.as_f64() as f32);
                         slow.air_temp = s.get("AirTemp").map(|v| v.as_f64() as f32);
                         slow.wetness = s.get("TrackWetness").map(|v| v.as_i32()).unwrap_or(0);

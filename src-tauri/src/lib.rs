@@ -323,6 +323,21 @@ fn fetch_reference(app: &AppHandle, key: String) {
             *coach::MATE.lock().unwrap() = Some((key, name, lap));
         }
     });
+    // Delta «migliore di sempre»: il tuo giro più veloce con questa pista e auto, dal sito
+    if let Some(token) = load_config(app).token {
+        let (t2, c2, k2) = (track_b.clone(), car_b.clone(), format!("{track_b}-{car_b}"));
+        tauri::async_runtime::spawn(async move {
+            let url = format!("{SITE}/api/pitwall/reference?track={t2}&car={c2}&who=me");
+            let Ok(r) = http().get(url).bearer_auth(token).timeout(Duration::from_secs(30)).send().await else { return };
+            if !r.status().is_success() {
+                return;
+            }
+            let Ok(v) = r.json::<serde_json::Value>().await else { return };
+            if let Some(lap) = v.get("data").and_then(coach::Lap::from_json) {
+                *coach::MY_BEST.lock().unwrap() = Some((k2, lap));
+            }
+        });
+    }
     // F14: tratto dello stile di guida da migliorare (per il Coach a voce)
     if let Some(token) = load_config(app).token {
         tauri::async_runtime::spawn(async move {
