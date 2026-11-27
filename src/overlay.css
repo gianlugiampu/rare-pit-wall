@@ -162,6 +162,7 @@ b { font-weight: 700; color: #fff; }
 .mappa svg { display: block; }
 .mappa .track { fill: none; stroke: rgb(255 255 255 / .55); stroke-width: 3; stroke-linejoin: round; }
 .mappa .finish { stroke: #fff; stroke-width: 2; }
+.mappa .nums text { font: 700 9px Montserrat, sans-serif; fill: var(--purple-200); text-anchor: middle; paint-order: stroke; stroke: rgb(12 0 21 / .85); stroke-width: 3px; }
 .mappa .car { will-change: transform; }
 .mappa .car circle { fill: #fff; }
 .mappa .car text { font: 700 8px Montserrat, sans-serif; fill: #111; }

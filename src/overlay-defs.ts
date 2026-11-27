@@ -141,6 +141,7 @@ export const DEFS: Record<string, Def> = {
     desc: "Il tracciato con le auto come pallini, dal disegno ufficiale di iRacing (scaricato e aggiornato da solo). Se una pista non si trova, si disegna dal tuo primo giro pulito.",
     fields: [
       { key: "finish", label: "Linea del traguardo", def: true },
+      { key: "corners", label: "Numeri delle curve (gli stessi del Coach e di Serena)", def: true },
       { key: "loss", label: "Tratti colorati: dove guadagni (verde) e perdi (rosso) sul riferimento del Coach", def: false },
     ],
     choices: [

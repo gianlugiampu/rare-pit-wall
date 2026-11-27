@@ -570,7 +570,11 @@ export function buildMappa(it: Item): { el: HTMLElement; update: (cars: Car[] | 
   const lossG = document.createElementNS(NS, "g");
   lossG.setAttribute("class", "lossg");
   let lossKey = "";
-  svg.append(track, lossG, finish, dotsG);
+  // numeri delle curve (gli stessi del Coach, del Delta e della modalità Scoperta)
+  const numG = document.createElementNS(NS, "g");
+  numG.setAttribute("class", "nums");
+  let numKey = "";
+  svg.append(track, lossG, finish, numG, dotsG);
   const msg = document.createElement("div");
   msg.className = "msg";
   el.append(svg, msg);
@@ -607,6 +611,7 @@ export function buildMappa(it: Item): { el: HTMLElement; update: (cars: Car[] | 
     finish.style.display = o("finish") ? "" : "none";
     dotsG.innerHTML = "";
     lossKey = "";
+    numKey = "";
   }
 
   const at = (m: TrackMap, pct: number): [number, number] => {
@@ -667,6 +672,32 @@ export function buildMappa(it: Item): { el: HTMLElement; update: (cars: Car[] | 
             path.setAttribute("d", d);
             path.setAttribute("class", l < 0 ? "gain" : "lose");
             lossG.append(path);
+          });
+        }
+      }
+      // numeri delle curve, accanto alla pista dal lato interno
+      const nk = o("corners") && info.zones?.length ? JSON.stringify([m.key, mapVersion, drawnKey, info.zones]) : "";
+      if (nk !== numKey) {
+        numKey = nk;
+        numG.innerHTML = "";
+        if (nk && info.zones) {
+          const n = m.points.length;
+          const all = m.points.map((p) => tf(p));
+          const cx = all.reduce((a, p) => a + p[0], 0) / n, cy = all.reduce((a, p) => a + p[1], 0) / n;
+          info.zones.forEach(([s, e], i) => {
+            const k = Math.min(n - 1, Math.floor(((s + e) / 2) * n));
+            const [x, y] = all[k], [x2, y2] = all[(k + 2) % n];
+            let nx = -(y2 - y), ny = x2 - x;
+            const len = Math.hypot(nx, ny) || 1;
+            nx /= len;
+            ny /= len;
+            // verso l'interno del disegno: così i numeri non escono dal riquadro
+            if ((x + nx - cx) ** 2 + (y + ny - cy) ** 2 > (x - cx) ** 2 + (y - cy) ** 2) { nx = -nx; ny = -ny; }
+            const t = document.createElementNS(NS, "text");
+            t.setAttribute("x", (x + nx * 11).toFixed(1));
+            t.setAttribute("y", (y + ny * 11 + 3).toFixed(1));
+            t.textContent = String(i + 1);
+            numG.append(t);
           });
         }
       }
